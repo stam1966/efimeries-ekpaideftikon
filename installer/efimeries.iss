@@ -106,9 +106,10 @@ begin
 end;
 
 function Hex4(N: Integer): String;
-const
-  Digits = '0123456789abcdef';
+var
+  Digits: String;
 begin
+  Digits := '0123456789abcdef';
   Result := Digits[((N shr 12) and 15) + 1] + Digits[((N shr 8) and 15) + 1] +
             Digits[((N shr 4) and 15) + 1] + Digits[(N and 15) + 1];
 end;

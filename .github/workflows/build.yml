@@ -69,8 +69,11 @@ jobs:
           $out = & $iscc "/DAppVersion=$env:APPVER" "/DArch=${{ matrix.arch }}" "/DSourceDir=..\$($tmp -replace '/','\')" installer\efimeries.iss 2>&1 | Out-String
           Write-Host $out
           if ($LASTEXITCODE -ne 0) {
-            $tail = ($out -split "`n" | Select-Object -Last 25) -join '%0A'
-            Write-Host "::error title=Inno Setup::$tail"
+            $lines = @($out -split "`n" | Where-Object { $_.Trim() -ne '' })
+            $errs = @($lines | Where-Object { $_ -match 'rror|nknown|ndeclared|xpected|nvalid|annot|ailed' } | Select-Object -First 8)
+            if ($errs.Count -eq 0) { $errs = @($lines | Select-Object -Last 8) }
+            $n = 0
+            foreach ($l in $errs) { $n++; Write-Host "::error title=ISCC $n::$($l.Trim())" }
             exit 1
           }
           Remove-Item -Recurse -Force $tmp
