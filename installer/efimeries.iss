@@ -1,4 +1,4 @@
-; Εγκατάσταση «Εφημερίες Εκπαιδευτικών» (Inno Setup 6). Χτίζεται στο GitHub Actions:
+﻿; Εγκατάσταση «Εφημερίες Εκπαιδευτικών» (Inno Setup 6). Χτίζεται στο GitHub Actions:
 ;   iscc /DAppVersion=0.49 /DArch=x64 /DSourceDir=..\dist\EfimeriesPortable_x64 installer\efimeries.iss
 #ifndef AppVersion
   #define AppVersion "0.0"
@@ -76,7 +76,76 @@ Type: files; Name: "{app}\storage_config.json"
 el.FinishedLabel=Η εγκατάσταση ολοκληρώθηκε. Η εφαρμογή ανοίγει από το εικονίδιο «Εφημερίες Εκπαιδευτικών». Τα δεδομένα σας φυλάσσονται στα Έγγραφα, στον φάκελο «Εφημερίες Εκπαιδευτικών», και διατηρούνται σε ενημερώσεις και απεγκατάσταση.
 
 [Code]
+var
+  DataPage: TInputDirWizardPage;
+
 function LaunchRequested(): Boolean;
 begin
   Result := ExpandConstant('{param:LAUNCH|0}') = '1';
+end;
+
+procedure InitializeWizard;
+begin
+  DataPage := CreateInputDirPage(wpSelectDir,
+    'Φάκελος δεδομένων',
+    'Πού θα αποθηκεύονται τα δεδομένα;',
+    'Επιλέξτε τον φάκελο όπου θα αποθηκεύονται η βάση δεδομένων, τα αντίγραφα ασφαλείας και οι εξαγωγές. ' +
+    'Αν θα χρησιμοποιείτε την εφαρμογή από δύο υπολογιστές του ίδιου δικτύου, επιλέξτε τον ΙΔΙΟ κοινόχρηστο φάκελο ' +
+    'και στους δύο (π.χ. \\ΥΠΟΛΟΓΙΣΤΗΣ\Εφημερίες) και ανοίγετε την εφαρμογή μόνο από έναν υπολογιστή τη φορά.',
+    False, 'Νέος φάκελος');
+  DataPage.Add('');
+  DataPage.Values[0] := ExpandConstant('{userdocs}\Εφημερίες Εκπαιδευτικών');
+end;
+
+{ Αν η εφαρμογή έχει ήδη ρυθμισμένο φάκελο δεδομένων (ενημέρωση), η σελίδα παραλείπεται }
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := False;
+  if (DataPage <> nil) and (PageID = DataPage.ID) then
+    Result := FileExists(ExpandConstant('{app}\storage_config.json'));
+end;
+
+function Hex4(N: Integer): String;
+const
+  Digits = '0123456789abcdef';
+begin
+  Result := Digits[((N shr 12) and 15) + 1] + Digits[((N shr 8) and 15) + 1] +
+            Digits[((N shr 4) and 15) + 1] + Digits[(N and 15) + 1];
+end;
+
+{ JSON μόνο με ASCII: οι ελληνικοί χαρακτήρες γράφονται ως \uXXXX, ώστε να μην χαλάσει η κωδικοποίηση }
+function JsonEscape(const S: String): String;
+var
+  I: Integer;
+  C: Char;
+begin
+  Result := '';
+  for I := 1 to Length(S) do
+  begin
+    C := S[I];
+    if C = '\' then
+      Result := Result + '\\'
+    else if C = '"' then
+      Result := Result + '\"'
+    else if Ord(C) > 126 then
+      Result := Result + '\u' + Hex4(Ord(C))
+    else
+      Result := Result + C;
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Cfg, Root: String;
+begin
+  if (CurStep = ssPostInstall) and (not WizardSilent) then
+  begin
+    Cfg := ExpandConstant('{app}\storage_config.json');
+    if not FileExists(Cfg) then
+    begin
+      Root := RemoveBackslash(DataPage.Values[0]);
+      ForceDirectories(Root);
+      SaveStringToFile(Cfg, '{"storage_root": "' + JsonEscape(Root) + '"}', False);
+    end;
+  end;
 end;

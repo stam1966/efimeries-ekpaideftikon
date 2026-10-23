@@ -38,7 +38,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 
 APP_TITLE = "Εφημερίες Εκπαιδευτικών"
-APP_VERSION = "0.49"
+APP_VERSION = "0.50"
 UPDATE_REPO = "stam1966/efimeries-ekpaideftikon"  # αποθετήριο GitHub από όπου ελέγχονται οι νέες εκδόσεις
 
 # Όρια εργασίας του εβδομαδιαίου σχεδιασμού (προστατεύουν από πολύ αργούς υπολογισμούς σε μεγάλα σχολεία).
@@ -969,6 +969,7 @@ class EfimeriesApp(tk.Tk):
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
         self.geometry(f"{min(1280, sw - 40)}x{min(740, sh - 90)}+{max(0, (sw - min(1280, sw - 40)) // 2)}+20")
         self.minsize(min(1100, sw - 40), min(640, sh - 90))
+        self._restore_window_geometry(sw, sh)
         self.configure(bg="#f4f4f4")
         self.style = ttk.Style(self)
         self._style_ui()
@@ -1266,7 +1267,34 @@ class EfimeriesApp(tk.Tk):
         except Exception:
             pass
 
+    def _restore_window_geometry(self, sw: int, sh: int) -> None:
+        """Θυμάται μέγεθος και θέση του παραθύρου από την προηγούμενη χρήση (πάντα εντός της οθόνης)."""
+        try:
+            st = self._update_state().get("window")
+            if not st:
+                return
+            w = max(900, min(int(st["w"]), sw))
+            h = max(600, min(int(st["h"]), sh - 40))
+            x = max(0, min(int(st["x"]), sw - 200))
+            y = max(0, min(int(st["y"]), sh - 120))
+            self.geometry(f"{w}x{h}+{x}+{y}")
+            if st.get("zoomed"):
+                self.state("zoomed")
+        except Exception:
+            pass
+
+    def _save_window_geometry(self) -> None:
+        try:
+            zoomed = self.state() == "zoomed"
+            if zoomed:
+                self.state("normal")
+                self.update_idletasks()
+            self._save_update_state(window={"w": self.winfo_width(), "h": self.winfo_height(), "x": self.winfo_x(), "y": self.winfo_y(), "zoomed": zoomed})
+        except Exception:
+            pass
+
     def _on_close(self) -> None:
+        self._save_window_geometry()
         try:
             self._auto_backup_if_due()
         except Exception:
@@ -2815,8 +2843,16 @@ class EfimeriesApp(tk.Tk):
             font=("Segoe UI", 15, "bold"), foreground="#34495E"
         ).pack(anchor="w")
         ttk.Label(
-            body, text=f"Έκδοση v{APP_VERSION} · {APP_ARCH}", foreground="#5F6B76"
-        ).pack(anchor="w", pady=(2, 14))
+            body, text=f"Έκδοση v{APP_VERSION} · {'64-bit' if APP_ARCH == 'x64' else '32-bit'}" + (" · εγκατεστημένη" if (app_dir() / "installed.flag").exists() else " · portable"), foreground="#5F6B76"
+        ).pack(anchor="w", pady=(2, 8))
+        loc = ttk.Frame(body)
+        loc.pack(fill="x", pady=(0, 10))
+        ttk.Label(loc, text="Φάκελος δεδομένων:", font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        ttk.Label(loc, text=str(STORAGE_ROOT), wraplength=460, foreground="#34495E").pack(anchor="w")
+        _shared = str(STORAGE_ROOT).startswith("\\\\")
+        ttk.Label(loc, text=("Κοινόχρηστος φάκελος δικτύου: ανοίγετε την εφαρμογή μόνο από έναν υπολογιστή τη φορά." if _shared else "Για χρήση από δύο υπολογιστές: Ρυθμίσεις → Τοποθεσία δεδομένων."),
+                  foreground="#7A858C", font=("Segoe UI", 8), wraplength=460).pack(anchor="w")
+        ttk.Button(loc, text="Άνοιγμα φακέλου δεδομένων", command=lambda: self.open_path(STORAGE_ROOT)).pack(anchor="w", pady=(4, 0))
 
         ttk.Label(
             body,
