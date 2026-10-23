@@ -64,6 +64,8 @@ Name: "{autodesktop}\Εφημερίες Εκπαιδευτικών"; Filename: "
 
 [Run]
 Filename: "{app}\{#ExeName}"; WorkingDir: "{app}"; Description: "Άνοιγμα της εφαρμογής"; Flags: nowait postinstall skipifsilent
+; Ενημέρωση μέσα από την εφαρμογή: ξανανοίγει μόνη της μετά την εγκατάσταση (/LAUNCH=1)
+Filename: "{app}\{#ExeName}"; WorkingDir: "{app}"; Flags: nowait; Check: LaunchRequested
 
 [UninstallDelete]
 ; Τα δεδομένα (Έγγραφα\Εφημερίες Εκπαιδευτικών) δεν διαγράφονται ΠΟΤΕ από την απεγκατάσταση.
@@ -72,3 +74,9 @@ Type: files; Name: "{app}\storage_config.json"
 
 [Messages]
 el.FinishedLabel=Η εγκατάσταση ολοκληρώθηκε. Η εφαρμογή ανοίγει από το εικονίδιο «Εφημερίες Εκπαιδευτικών». Τα δεδομένα σας φυλάσσονται στα Έγγραφα, στον φάκελο «Εφημερίες Εκπαιδευτικών», και διατηρούνται σε ενημερώσεις και απεγκατάσταση.
+
+[Code]
+function LaunchRequested(): Boolean;
+begin
+  Result := ExpandConstant('{param:LAUNCH|0}') = '1';
+end;

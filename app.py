@@ -2613,6 +2613,7 @@ class EfimeriesApp(tk.Tk):
         with urllib.request.urlopen(req, timeout=8) as r:
             data = json.loads(r.read().decode("utf-8"))
         return {"tag": str(data.get("tag_name", "")), "name": str(data.get("name") or ""),
+                "assets": [{"name": str(a.get("name", "")), "url": str(a.get("browser_download_url", "")), "size": int(a.get("size") or 0)} for a in data.get("assets", [])],
                 "body": str(data.get("body") or ""), "url": str(data.get("html_url") or f"https://github.com/{UPDATE_REPO}/releases/latest")}
 
     def check_for_updates(self, manual: bool = False) -> None:
@@ -2666,6 +2667,89 @@ class EfimeriesApp(tk.Tk):
             return
         self._show_update_dialog(rel)
 
+    def _setup_asset(self, rel: dict) -> Optional[dict]:
+        """Το Setup.exe της δικής μας αρχιτεκτονικής, μόνο για εγκατεστημένη εφαρμογή και μόνο από το github.com."""
+        try:
+            if not (app_dir() / "installed.flag").exists() or not getattr(sys, "frozen", False):
+                return None
+        except Exception:
+            return None
+        arch = "x64" if APP_ARCH == "x64" else "x86"
+        for a in rel.get("assets", []):
+            n, u = a.get("name", ""), a.get("url", "")
+            if re.fullmatch(rf"Efimeries_Setup_v[\d.]+_{arch}\.exe", n) and u.startswith("https://github.com/"):
+                return a
+        return None
+
+    def _download_file(self, url: str, dest: Path, progress=None) -> None:
+        import urllib.request
+        req = urllib.request.Request(url, headers={"User-Agent": f"EfimeriesPortable/{APP_VERSION}"})
+        with urllib.request.urlopen(req, timeout=30) as r, open(dest, "wb") as f:
+            total = int(r.headers.get("Content-Length") or 0)
+            done = 0
+            while True:
+                chunk = r.read(256 * 1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+                done += len(chunk)
+                if progress:
+                    progress(done, total)
+
+    def download_and_install_update(self, asset: dict, tag: str) -> None:
+        """Κατεβάζει το Setup, κλείνει την εφαρμογή (με αυτόματο backup) και το τρέχει. Τα δεδομένα δεν αγγίζονται."""
+        import threading
+        dest = Path(tempfile.gettempdir()) / asset["name"]
+        win = self._modal("Λήψη ενημέρωσης", 440, 170)
+        ttk.Label(win, text=f"Λήψη της έκδοσης {tag}…", font=("Segoe UI", 11, "bold")).pack(anchor="w", padx=18, pady=(18, 6))
+        bar = ttk.Progressbar(win, mode="determinate", maximum=100)
+        bar.pack(fill="x", padx=18)
+        info = ttk.Label(win, text="", foreground="#5F6B76")
+        info.pack(anchor="w", padx=18, pady=6)
+        box: dict = {"p": (0, 0)}
+
+        def work():
+            try:
+                self._download_file(asset["url"], dest, lambda d, t: box.__setitem__("p", (d, t)))
+                box["ok"] = True
+            except Exception as exc:
+                box["err"] = exc
+        threading.Thread(target=work, daemon=True).start()
+
+        def poll():
+            d, t = box["p"]
+            if t:
+                bar["value"] = 100 * d / t
+                info.config(text=f"{d / 1048576:.1f} / {t / 1048576:.1f} MB")
+            if "err" in box:
+                win.destroy()
+                LOG.info("Αποτυχία λήψης ενημέρωσης: %s", box["err"])
+                messagebox.showerror("Λήψη ενημέρωσης", "Η λήψη απέτυχε. Δοκιμάστε ξανά αργότερα ή κατεβάστε το Setup από τη σελίδα του αποθετηρίου.")
+                return
+            if "ok" in box:
+                win.destroy()
+                try:
+                    if asset.get("size") and dest.stat().st_size != int(asset["size"]):
+                        raise OSError("το μέγεθος του αρχείου δεν ταιριάζει")
+                except Exception as exc:
+                    messagebox.showerror("Λήψη ενημέρωσης", f"Το αρχείο που κατέβηκε δεν είναι έγκυρο ({exc}). Δοκιμάστε ξανά.")
+                    return
+                self._launch_setup(dest)
+                return
+            self.after(150, poll)
+        self.after(150, poll)
+
+    def _launch_setup(self, path: Path) -> None:
+        if not messagebox.askyesno("Ενημέρωση", "Η εφαρμογή θα κλείσει για να γίνει η εγκατάσταση της νέας έκδοσης.\nΤα δεδομένα σας δεν επηρεάζονται και θα ανοίξει ξανά μετά. Να συνεχίσω;"):
+            return
+        try:
+            import subprocess
+            subprocess.Popen([str(path), "/SILENT", "/NORESTART", "/CLOSEAPPLICATIONS", "/LAUNCH=1"], close_fds=True)
+        except Exception as exc:
+            messagebox.showerror("Ενημέρωση", f"Δεν ήταν δυνατή η εκκίνηση της εγκατάστασης:\n{exc}")
+            return
+        self._on_close()
+
     def _show_update_dialog(self, rel: dict) -> None:
         win = self._modal("Νέα έκδοση διαθέσιμη", 560, 440)
         body = ttk.Frame(win, padding=18)
@@ -2681,6 +2765,12 @@ class EfimeriesApp(tk.Tk):
         def open_page():
             webbrowser.open(rel["url"])
             win.destroy()
+        asset = self._setup_asset(rel)
+        if asset:
+            def install_now():
+                win.destroy()
+                self.download_and_install_update(asset, rel["tag"])
+            ttk.Button(foot, text="Λήψη και εγκατάσταση τώρα", style="Accent.TButton", command=install_now).pack(side="right", padx=(0, 8))
         def skip():
             self._save_update_state(skip=rel["tag"])
             win.destroy()
