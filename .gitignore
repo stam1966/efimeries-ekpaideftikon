@@ -1,0 +1,17 @@
+# Δεδομένα χρήστη — ΠΟΤΕ στο αποθετήριο
+data/
+backups/
+exports/
+logs/
+Shared/
+*.db
+*.db-wal
+*.db-shm
+*.efbackup
+# Build
+build/
+dist/
+release/
+__pycache__/
+*.pyc
+.pyarmor/
