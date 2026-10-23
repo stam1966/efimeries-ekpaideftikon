@@ -201,6 +201,21 @@ def set_storage_root(root: Path) -> None:
     LOCK_FILE = STORAGE_ROOT / ".efimeries.lock"
 
 
+def installed_data_root() -> Path:
+    """Φάκελος δεδομένων της εγκατεστημένης εφαρμογής: Έγγραφα\\Εφημερίες Εκπαιδευτικών."""
+    docs = None
+    if sys.platform.startswith("win"):
+        try:
+            import ctypes
+            from ctypes import wintypes
+            buf = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
+            if ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buf) == 0:  # CSIDL_PERSONAL
+                docs = Path(buf.value)
+        except Exception:
+            docs = None
+    return (docs or (Path.home() / "Documents")) / "Εφημερίες Εκπαιδευτικών"
+
+
 def load_storage_root() -> Path:
     if CONFIG_PATH.exists():
         try:
@@ -210,6 +225,13 @@ def load_storage_root() -> Path:
                 return Path(value)
         except Exception:
             pass
+    # Εγκατεστημένη έκδοση (Setup.exe): ο φάκελος της εφαρμογής έχει το αρχείο installed.flag.
+    # Τα δεδομένα μένουν στα Έγγραφα, κοινά για x64 και x86, και δεν χάνονται σε ενημέρωση ή απεγκατάσταση.
+    try:
+        if (app_dir() / "installed.flag").exists():
+            return installed_data_root()
+    except Exception:
+        pass
     # Αν οι x86/x64 βρίσκονται σε αδελφούς φακέλους και υπάρχει Shared,
     # τον αναγνωρίζουμε αυτόματα στην πρώτη εκκίνηση.
     here = app_dir()

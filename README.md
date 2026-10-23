@@ -1,21 +1,23 @@
-# Εφημερίες Εκπαιδευτικών Portable
+# Εφημερίες Εκπαιδευτικών
 
 Εφαρμογή Windows (Python / Tkinter / SQLite) για δημιουργία και διαχείριση προγράμματος εφημεριών εκπαιδευτικών.
-Δεν χρειάζεται εγκατάσταση πακέτων για να τρέξει από τον κώδικα: `python app.py`.
 
-## Δημιουργία αρχείων διανομής (x64 + x86)
-Γίνεται αυτόματα στο GitHub, χωρίς Windows στον υπολογιστή σου:
+## Λήψη
+Από τη σελίδα **[Releases](https://github.com/stam1966/efimeries-ekpaideftikon/releases/latest)**:
+- `Efimeries_Setup_v…_x64.exe`: εγκατάσταση για 64-bit Windows (οι περισσότεροι υπολογιστές).
+- `Efimeries_Setup_v…_x86.exe`: εγκατάσταση για 32-bit Windows.
+- `EfimeriesPortable_v…_Portable.zip`: portable μορφή χωρίς εγκατάσταση (x64 + x86 + κοινός φάκελος `Shared`).
+
+Η εγκατάσταση δεν χρειάζεται δικαιώματα διαχειριστή. Τα δεδομένα αποθηκεύονται στα **Έγγραφα → Εφημερίες Εκπαιδευτικών** (κοινά για x64/x86) και δεν διαγράφονται ποτέ από ενημέρωση ή απεγκατάσταση. Αν τα Windows δείξουν «Τα Windows προστάτευσαν τον υπολογιστή σας», πατήστε «Περισσότερες πληροφορίες» → «Εκτέλεση οπωσδήποτε».
+
+## Δημιουργία έκδοσης (αυτόματα στο GitHub)
 1. Άλλαξε το `APP_VERSION` στο `app.py` και κάνε commit.
-2. Φτιάξε tag: `git tag v0.49 && git push --tags`.
-3. Στο GitHub → **Actions** τρέχει το «Build Windows (x64 + x86)» (~5–10 λεπτά).
-4. Το έτοιμο `EfimeriesPortable_v0_49_Distribution.zip` εμφανίζεται στα **Releases** (και ως artifact στο run).
-
-Το zip περιέχει `x64/`, `x86/`, τον κοινό φάκελο `Shared/` (data, backups, exports), τον οδηγό PDF και το README.
-Το όνομα του zip παίρνει την έκδοση από το `APP_VERSION`. Δεν υπάρχει σταθερός αριθμός πουθενά.
-Χειροκίνητη εκτέλεση: Actions → Run workflow.
+2. Δημοσίευσε Release με νέο tag, π.χ. `v0.50` (ή `git tag v0.50 && git push --tags`).
+3. Το workflow «Build Windows» φτιάχνει σε Windows: Setup.exe x64, Setup.exe x86 και το portable zip, δοκιμάζει εγκατάσταση/απεγκατάσταση και τα ανεβάζει στο Release (~10 λεπτά).
+Χειροκίνητη εκτέλεση (χωρίς release): Actions → Run workflow.
+Η εφαρμογή ελέγχει μόνη της για νέα έκδοση από τα Releases (χωρίς να στέλνει δεδομένα σχολείου).
 
 ## Προσωπικά δεδομένα
-Οι φάκελοι `data/`, `backups/`, `exports/`, `logs/`, `Shared/` και τα αρχεία `.db` / `.efbackup` εξαιρούνται από το αποθετήριο (`.gitignore`). Μην τα ανεβάζεις.
+Οι φάκελοι `data/`, `backups/`, `exports/`, `logs/`, `Shared/` και τα `.db` / `.efbackup` εξαιρούνται (`.gitignore`). Μην τα ανεβάζεις.
 
-## Τοπικά builds
-Τα `build_*.bat` παραμένουν για χειροκίνητη δημιουργία στα Windows. Βλ. `CHANGELOG.md` και `docs/`.
+Βλ. `CHANGELOG.md` και `docs/`. Αναφορά προβλήματος: [Issues](https://github.com/stam1966/efimeries-ekpaideftikon/issues).

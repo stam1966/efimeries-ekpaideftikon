@@ -1,4 +1,4 @@
-name: Build Windows (x64 + x86)
+name: Build Windows (Setup.exe x64 + x86, portable)
 
 on:
   push:
@@ -15,52 +15,118 @@ jobs:
       fail-fast: true
       matrix:
         arch: [x64, x86]
+    defaults:
+      run:
+        shell: pwsh
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           architecture: ${{ matrix.arch }}
+
+      - name: Έκδοση από το app.py
+        run: |
+          $line = Select-String -Path app.py -Pattern '^APP_VERSION' | Select-Object -First 1
+          $ver = ($line.Line -split '=')[1].Trim().Trim('"')
+          "APPVER=$ver" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "APPVER_U=$($ver.Replace('.', '_'))" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Έκδοση $ver (${{ matrix.arch }})"
+
+      - name: Έλεγχος αρχιτεκτονικής Python
+        run: python -c "import struct;print(struct.calcsize('P')*8, 'bit')"
+
       - name: Install PyInstaller
         run: python -m pip install --upgrade pyinstaller
-      - name: Build ${{ matrix.arch }}
+
+      - name: Build ${{ matrix.arch }} (PyInstaller)
         shell: cmd
         run: >
           python -m PyInstaller --noconfirm --clean --onedir --windowed
           --icon app_icon.ico --add-data "app_icon.ico;." --add-data "sv_ttk;sv_ttk"
           --hidden-import sv_ttk --add-data "Odigos_Chrisis_Efimeries.pdf;."
           --name EfimeriesPortable_${{ matrix.arch }} app.py
-      - name: Add portable folders
-        shell: pwsh
+
+      - name: Portable φάκελος (data / exports / backups / οδηγός)
         run: |
           $d = "dist/EfimeriesPortable_${{ matrix.arch }}"
-          New-Item -ItemType Directory -Force "$d/data/years","$d/exports","$d/backups" | Out-Null
           Copy-Item app_icon.ico, Odigos_Chrisis_Efimeries.pdf, create_shortcut.bat $d
+          # Για το portable zip: φάκελοι δεδομένων (ΔΕΝ μπαίνουν στο Setup.exe)
+          New-Item -ItemType Directory -Force "$d/data/years","$d/exports","$d/backups" | Out-Null
+
+      - name: Setup.exe (Inno Setup)
+        run: |
+          try { Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/Greek.isl' -OutFile installer\Greek.isl } catch { Write-Host "::warning::Greek.isl δεν κατέβηκε: $_" }
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          # Στο Setup.exe δεν μπαίνουν δεδομένα: αφαιρούνται οι φάκελοι δεδομένων από ένα προσωρινό αντίγραφο
+          $src = "dist/EfimeriesPortable_${{ matrix.arch }}"
+          $tmp = "dist/_setup_src_${{ matrix.arch }}"
+          Copy-Item $src $tmp -Recurse
+          Remove-Item -Recurse -Force "$tmp/data","$tmp/exports","$tmp/backups" -ErrorAction SilentlyContinue
+          $out = & $iscc "/DAppVersion=$env:APPVER" "/DArch=${{ matrix.arch }}" "/DSourceDir=..\$($tmp -replace '/','\')" installer\efimeries.iss 2>&1 | Out-String
+          Write-Host $out
+          if ($LASTEXITCODE -ne 0) {
+            $tail = ($out -split "`n" | Select-Object -Last 25) -join '%0A'
+            Write-Host "::error title=Inno Setup::$tail"
+            exit 1
+          }
+          Remove-Item -Recurse -Force $tmp
+
+      - name: Δοκιμαστική σιωπηλή εγκατάσταση και απεγκατάσταση
+        run: |
+          $setup = Get-ChildItem dist\Efimeries_Setup_v*_${{ matrix.arch }}.exe | Select-Object -First 1
+          Start-Process $setup.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/TASKS=' -Wait
+          $app = "$env:LOCALAPPDATA\Programs\EfimeriesEkpaideftikon"
+          if (-not (Test-Path "$app\EfimeriesPortable_${{ matrix.arch }}.exe")) { throw "Η εγκατάσταση δεν δημιούργησε την εφαρμογή" }
+          if (-not (Test-Path "$app\installed.flag")) { throw "Λείπει το installed.flag" }
+          if (-not (Test-Path "$app\Odigos_Chrisis_Efimeries.pdf")) { throw "Λείπει ο οδηγός" }
+          if (Test-Path "$app\data") { throw "Το Setup δεν πρέπει να περιέχει φάκελο data" }
+          $un = Get-ChildItem "$app\unins*.exe" | Select-Object -First 1
+          Start-Process $un.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait
+          Write-Host "Εγκατάσταση/απεγκατάσταση OK"
+
       - uses: actions/upload-artifact@v4
         with:
-          name: build-${{ matrix.arch }}
+          name: setup-${{ matrix.arch }}
+          path: dist/Efimeries_Setup_v*_${{ matrix.arch }}.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: portable-${{ matrix.arch }}
           path: dist/EfimeriesPortable_${{ matrix.arch }}
 
   package:
     needs: build
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: build-x64
+          name: setup-x64
+          path: release/setups
+      - uses: actions/download-artifact@v4
+        with:
+          name: setup-x86
+          path: release/setups
+      - uses: actions/download-artifact@v4
+        with:
+          name: portable-x64
           path: dist/EfimeriesPortable_x64
       - uses: actions/download-artifact@v4
         with:
-          name: build-x86
+          name: portable-x86
           path: dist/EfimeriesPortable_x86
-      - name: Assemble distribution
-        shell: pwsh
+
+      - name: Συναρμολόγηση portable zip (x64 + x86 + κοινός φάκελος Shared)
         run: |
           $line = Select-String -Path app.py -Pattern '^APP_VERSION' | Select-Object -First 1
           $ver = ($line.Line -split '=')[1].Trim().Trim('"')
           $u = $ver.Replace('.', '_')
-          "VER_U=$u" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           $rel = "release/EfimeriesPortable_v$u"
           New-Item -ItemType Directory -Force $rel | Out-Null
           Copy-Item dist/EfimeriesPortable_x64 "$rel/x64" -Recurse
@@ -68,13 +134,23 @@ jobs:
           New-Item -ItemType Directory -Force "$rel/Shared/data/years","$rel/Shared/backups","$rel/Shared/exports" | Out-Null
           Copy-Item Odigos_Chrisis_Efimeries.pdf "$rel/Odigos_Chrisis_Efimeries.pdf"
           Copy-Item DISTRIBUTION_README.txt "$rel/README.txt"
-          Compress-Archive -Path "$rel/*" -DestinationPath "release/EfimeriesPortable_v${u}_Distribution.zip" -Force
+          Compress-Archive -Path "$rel/*" -DestinationPath "release/EfimeriesPortable_v${u}_Portable.zip" -Force
+          Get-ChildItem release -Recurse -File | Where-Object { $_.Extension -in '.exe','.zip' } | ForEach-Object { Write-Host $_.FullName }
+
       - uses: actions/upload-artifact@v4
         with:
           name: distribution
-          path: release/*.zip
-      - name: Publish release (tags only)
+          path: |
+            release/setups/*.exe
+            release/*.zip
+
+      - name: Δημοσίευση release (μόνο σε tag)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: release/*.zip
+          name: Εφημερίες Εκπαιδευτικών ${{ github.ref_name }}
+          make_latest: true
+          generate_release_notes: true
+          files: |
+            release/setups/*.exe
+            release/*.zip
