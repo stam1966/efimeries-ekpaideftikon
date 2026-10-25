@@ -37,7 +37,7 @@ echo.
 echo [3/3] Building stable portable folder...
 if exist "dist\%OUTNAME%" rmdir /s /q "dist\%OUTNAME%" >nul 2>nul
 if exist "dist\%OUTNAME%" goto locked_output
-%PY% -m PyInstaller --noconfirm --clean --onedir --windowed --icon "app_icon.ico" --add-data "app_icon.ico;." --add-data "sv_ttk;sv_ttk" --hidden-import sv_ttk --add-data "Odigos_Chrisis_Efimeries.pdf;." --name %OUTNAME% app.py
+%PY% -m PyInstaller --noconfirm --clean --onedir --windowed --icon "app_icon.ico" --add-data "app_icon.ico;." --add-data "sv_ttk;sv_ttk" --hidden-import sv_ttk --hidden-import webui --hidden-import webui_assets --add-data "Odigos_Chrisis_Efimeries.pdf;." --name %OUTNAME% app.py
 if errorlevel 1 goto error
 
 if not exist "dist\%OUTNAME%\data" mkdir "dist\%OUTNAME%\data"

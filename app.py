@@ -38,7 +38,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 
 APP_TITLE = "Εφημερίες Εκπαιδευτικών"
-APP_VERSION = "0.52"
+APP_VERSION = "0.60"
 UPDATE_REPO = "stam1966/efimeries-ekpaideftikon"  # αποθετήριο GitHub από όπου ελέγχονται οι νέες εκδόσεις
 
 # Όρια εργασίας του εβδομαδιαίου σχεδιασμού (προστατεύουν από πολύ αργούς υπολογισμούς σε μεγάλα σχολεία).
@@ -1695,7 +1695,10 @@ class EfimeriesApp(tk.Tk):
         self.home_build_var = tk.StringVar(value=f"v{APP_VERSION} · {APP_ARCH}")
         tk.Label(hero, textvariable=self.home_build_var, bg="#2F6F73", fg="#D6E2E2", font=("Segoe UI", 9, "bold")).pack(anchor="e", side="right")
 
-        ttk.Label(f, text="Γρήγορη εικόνα και βασικές ενέργειες καθημερινής χρήσης.", foreground="#5F6B76").pack(anchor="w", pady=(8, 6))
+        _wb = ttk.Frame(f)
+        _wb.pack(fill="x", pady=(8, 6))
+        ttk.Label(_wb, text="Γρήγορη εικόνα και βασικές ενέργειες καθημερινής χρήσης.", foreground="#5F6B76").pack(side="left")
+        ttk.Button(_wb, text="Νέα διεπαφή (Edge) — δοκιμαστική", style="Accent.TButton", command=self.open_web_ui).pack(side="right")
 
         cards = ttk.Frame(f)
         cards.pack(fill="x")
@@ -6795,6 +6798,28 @@ class EfimeriesApp(tk.Tk):
         txt.insert("end", "\n".join(lines) if lines else "Δεν βρέθηκαν συγκρούσεις: όλες οι θέσεις είναι καλυμμένες και υπάρχουν αρκετοί διαθέσιμοι/ες.")
         txt.config(state="disabled")
 
+    # ---- v0.60: νέα διεπαφή (Edge) -------------------------------------------------
+    def open_web_ui(self, hidden: bool = False) -> None:
+        """Ξεκινά (αν δεν τρέχει ήδη) τον τοπικό server της νέας διεπαφής και την ανοίγει στον Edge."""
+        try:
+            ui = self.__dict__.get("_webui")
+            if ui is None:
+                import webui
+                ui = webui.WebUI(self, hidden=hidden)
+                self._webui = ui
+                url = ui.start()
+                self._webui_url = url
+            else:
+                url = self._webui_url
+                ui.hidden = hidden or ui.hidden
+            ui.open_browser(url)
+            if not hidden:
+                self.notify("Η νέα διεπαφή άνοιξε στον Edge.", ms=4000)
+        except Exception as e:
+            LOG.exception("Αποτυχία εκκίνησης νέας διεπαφής")
+            self.deiconify()
+            messagebox.showerror("Νέα διεπαφή", f"Δεν ήταν δυνατό να ανοίξει η νέα διεπαφή:\n{e}")
+
     def lock_completed_until(self):
         """Κλειδώνει αναθέσεις έως και μια ημερομηνία, ώστε να θεωρούνται πραγματοποιημένες."""
         default = getattr(self, "regenerate_from_var", tk.StringVar(value=fmt_date(date.today()))).get()
@@ -9121,6 +9146,13 @@ def main():
     setup_logging()
     sys.excepthook = lambda t, v, tb: LOG.error("Μη χειριζόμενο σφάλμα:\n%s", "".join(traceback.format_exception(t, v, tb)))
     app = EfimeriesApp()
+    try:
+        if "--web" in sys.argv or app.db.get_setting("ui_mode", "classic") == "web":
+            app.withdraw()
+            app.open_web_ui(hidden=True)
+    except Exception:
+        LOG.exception("Εκκίνηση με τη νέα διεπαφή")
+        app.deiconify()
     app.mainloop()
 
 
