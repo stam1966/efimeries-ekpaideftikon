@@ -168,15 +168,16 @@ const ICON={
  people:'<circle cx="9" cy="8" r="3.4"/><path d="M2.5 20c.6-3.7 3.2-5.5 6.5-5.5s5.9 1.8 6.5 5.5"/><path d="M16 5.2a3.2 3.2 0 010 6M18 14.8c2 .6 3.2 2.3 3.5 5"/>',
  off:'<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>',
  gen:'<path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8"/>',
- more:'<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>'};
-const PAGES=[["home","Αρχική","home"],["schedule","Πρόγραμμα","cal"],["teachers","Εκπαιδευτικοί","people"],["absences","Απουσίες","off"],["generate","Παραγωγή","gen"],["more","Περισσότερα","more"]];
+ more:'<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>',
+ gear:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 01-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 010-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 014 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 010 4h-.1a1.7 1.7 0 00-1.5 1z"/>'};
+const PAGES=[["home","Αρχική","home"],["schedule","Πρόγραμμα","cal"],["teachers","Εκπαιδευτικοί","people"],["absences","Απουσίες","off"],["generate","Παραγωγή","gen"],["settings","Ρυθμίσεις","gear"]];
 let S=null,cur="home";
 const nav=$("#nav");
 PAGES.forEach(([k,l,ic])=>nav.append(h("a",{id:"n-"+k,href:"#"+k,html:`<svg viewBox="0 0 24 24">${ICON[ic]}</svg>`},l)));
 function go(k){location.hash="#"+k}
 window.addEventListener("hashchange",route);
 async function route(){
-  cur=(location.hash||"#home").slice(1).split("/")[0];if(!PAGES.some(p=>p[0]===cur))cur="home";
+  cur=(location.hash||"#home").slice(1).split("/")[0];if(cur==="more")cur="settings";if(!PAGES.some(p=>p[0]===cur))cur="home";
   PAGES.forEach(p=>$("#n-"+p[0]).classList.toggle("on",p[0]===cur));
   closeDrawer();
   const v=$("#view");v.replaceChildren(h("div",{class:"empty"},"Φόρτωση…"));
@@ -330,7 +331,7 @@ function editTeacher(t){
       h("p",{class:"m",style:"color:var(--muted)"},"Πάτησε με τη σειρά που προτιμάς: ο αριθμός δείχνει τη σειρά προτεραιότητας."),
       h("div",{class:"row",style:"margin-top:8px"},cb("Συμμετέχει στον κύκλο πρόσθετων εφημεριών",st.extra_cycle,v=>st.extra_cycle=v?1:0)),
       h("label",{class:"f",style:"margin-top:14px"},"Σημειώσεις",notes),
-      h("p",{class:"m",style:"color:var(--muted);margin-top:14px"},"Διαθεσιμότητα ανά διάλειμμα/βάρδια: από τις «Περισσότερα → κλασική διεπαφή»."))}
+      h("p",{class:"m",style:"color:var(--muted);margin-top:14px"},"Διαθεσιμότητα ανά διάλειμμα/βάρδια: από τις Ρυθμίσεις → Εφαρμογή → «Για προχωρημένους»."))}
   function cb(l,v,f){const i=h("input",{type:"checkbox",onchange:e=>f(e.target.checked)});i.checked=!!v;return h("label",{class:"row",style:"cursor:pointer"},i,l)}
   draw();
   openDrawer(t.name,"",body,[h("button",{class:"btn",onclick:closeDrawer},"Άκυρο"),h("button",{class:"btn pri",onclick:e=>guard(async()=>{st.name=name.value;st.notes=notes.value;await api("/api/teacher/save",st);closeDrawer();toast("Αποθηκεύτηκε");route()},e.target)},"Αποθήκευση")])}
@@ -402,16 +403,9 @@ PAGE.generate=async v=>{
   draw()};
 /* ---------------- Περισσότερα ---------------- */
 async function classic(tab){await guard(async()=>{await api("/api/classic",{tab});toast("Ανοίχτηκε η κλασική διεπαφή στο παράθυρο της εφαρμογής.")})}
-PAGE.more=async v=>{
-  v.append(h("h1",{},"Περισσότερα"),h("p",{class:"sub"},"Ρυθμίσεις που δεν έχουν ακόμη μεταφερθεί στη νέα διεπαφή ανοίγουν από την κλασική, με ένα κλικ."));
-  const tile=(t,d,tab)=>h("div",{class:"card"},h("h2",{},t),h("p",{class:"m",style:"color:var(--muted);margin-top:-4px"},d),h("button",{class:"btn",onclick:()=>classic(tab)},"Άνοιγμα στην κλασική διεπαφή"));
-  v.append(h("div",{class:"grid g2"},
-    tile("Σχολείο, σχολικό έτος, backup","Στοιχεία σχολείου, αλλαγή έτους, αντίγραφα ασφαλείας, ενημέρωση εφαρμογής.","settings"),
-    tile("Τομείς εφημερίας","Προσθήκη και σειρά των τομέων.","areas"),
-    tile("Χρονικές ζώνες (διαλείμματα)","Ώρες και ονόματα ζωνών.","intervals"),
-    tile("Ειδικές ημέρες","Αργίες, ημίωρες, ημέρες χωρίς εφημερία.","calendar"),
-    tile("Βάρδιες","Ρυθμίσεις για τον τρόπο «Ανά βάρδια».","shifts"),
-    tile("Εκτυπώσεις & εξαγωγές Excel","Αναλυτικές εκτυπώσεις, σύνολα, εξαγωγή σε Excel/PDF.","reports")));
+const TAB={};
+TAB.app=async v=>{
+  const tile=(t,d,tab,btn)=>h("div",{class:"card"},h("h2",{},t),h("p",{class:"m",style:"color:var(--muted);margin-top:-4px"},d),h("button",{class:"btn",onclick:()=>classic(tab)},btn||"Άνοιγμα στην κλασική διεπαφή"));
   const lbl=h("label",{class:"row",style:"cursor:pointer"});const cbx=h("input",{type:"checkbox",onchange:e=>guard(async()=>{await api("/api/setting",{key:"ui_mode",value:e.target.checked?"web":"classic"});toast(e.target.checked?"Την επόμενη φορά η εφαρμογή θα ανοίγει με τη νέα διεπαφή.":"Η εφαρμογή θα ανοίγει με την κλασική διεπαφή.")})});cbx.checked=S.web_start;
   lbl.append(cbx,"Εκκίνηση της εφαρμογής με τη νέα διεπαφή");
   v.append(h("div",{class:"card",style:"margin-top:16px"},h("h2",{},"Εμφάνιση και εκκίνηση"),lbl,
@@ -426,7 +420,76 @@ PAGE.more=async v=>{
     h("div",{class:"row"},ubtn,ust),h("label",{class:"row",style:"cursor:pointer;margin-top:10px"},acb,"Αυτόματος έλεγχος για νέα έκδοση στην εκκίνηση (το πολύ μία φορά το 24ωρο)")));
   v.append(h("div",{class:"card",style:"margin-top:16px"},h("h2",{},"Πληροφορίες"),h("p",{class:"m",style:"margin:0;color:var(--muted)"},`Έκδοση v${S.version} (${S.arch}) · Φάκελος δεδομένων: ${S.data_dir}`),
     h("div",{class:"row",style:"margin-top:12px"},h("button",{class:"btn danger",onclick:()=>{if(confirm("Να κλείσει η εφαρμογή;"))api("/api/quit",{}).then(()=>{document.body.innerHTML='<div style="padding:60px;text-align:center;font:16px system-ui">Η εφαρμογή έκλεισε. Μπορείτε να κλείσετε αυτό το παράθυρο.</div>'}).catch(()=>{})}},"Έξοδος από την εφαρμογή"))));
+  v.append(h("div",{class:"card",style:"margin-top:16px"},h("h2",{},"Για προχωρημένους (κλασική διεπαφή)"),h("p",{class:"m",style:"color:var(--muted);margin-top:-4px"},"Αυτά δεν έχουν ακόμη μεταφερθεί στη νέα διεπαφή· ανοίγουν με ένα κλικ στην κλασική."),
+    h("div",{class:"row"},[["Σχολικό έτος, backup, ωρολόγιο","settings"],["Εκτυπώσεις και Excel","reports"],["Βάρδιες","shifts"]].map(([l,t])=>h("button",{class:"btn",onclick:()=>classic(t)},l)))));
 };
+
+/* ---------------- Ρυθμίσεις ---------------- */
+let ST={tab:"school"};
+PAGE.settings=async v=>{
+  v.append(h("h1",{},"Ρυθμίσεις"),h("p",{class:"sub"},"Σχολείο, τομείς, χρονικές ζώνες, ειδικές ημέρες και εμφάνιση."));
+  const tabs=[["school","Σχολείο"],["areas","Τομείς"],["intervals","Χρονικές ζώνες"],["days","Ειδικές ημέρες"],["app","Εφαρμογή"]];
+  v.append(h("div",{class:"seg",style:"margin-bottom:16px;flex-wrap:wrap"},tabs.map(([k,l])=>h("button",{class:ST.tab===k?"on":"",onclick:()=>{ST.tab=k;route()}},l))));
+  const box=h("div");v.append(box);await TAB[ST.tab](box)};
+const fld=(l,inp)=>h("label",{class:"f"},l,inp);
+const chk=(l,on,f)=>{const i=h("input",{type:"checkbox",onchange:e=>f(e.target.checked)});i.checked=!!on;return h("label",{class:"row",style:"cursor:pointer"},i,l)};
+const saveBtn=(fn,label)=>h("button",{class:"btn pri",onclick:e=>guard(fn,e.currentTarget)},label||"Αποθήκευση");
+TAB.school=async v=>{
+  const g=await api("/api/settings");
+  const name=h("input",{type:"text",value:g.school_name,style:"width:100%"}),phone=h("input",{type:"text",value:g.school_phone}),mail=h("input",{type:"text",value:g.school_email}),
+        a=h("input",{type:"date",value:g.start}),z=h("input",{type:"date",value:g.end});
+  v.append(h("div",{class:"card"},h("h2",{},"Στοιχεία σχολείου"),h("div",{class:"grid g2"},fld("Ονομασία σχολείου",name),h("div",{}),fld("Τηλέφωνο",phone),fld("Email",mail)),
+    h("h2",{style:"margin-top:18px"},"Σχολικό έτος "+g.school_year),h("div",{class:"row"},fld("Έναρξη μαθημάτων",a),fld("Λήξη μαθημάτων",z)),
+    h("div",{class:"row",style:"margin-top:16px"},saveBtn(async()=>{await api("/api/settings/save",{school_name:name.value,school_phone:phone.value,school_email:mail.value,start:a.value,end:z.value});toast("Αποθηκεύτηκε");route()})),
+    h("p",{class:"m",style:"color:var(--muted)"},"Αλλαγή σχολικού έτους και backup: Εφαρμογή → «Για προχωρημένους».")))};
+function simpleTable(cols,rows,onrow,empty){return rows.length?h("table",{},h("thead",{},h("tr",{},cols.map(c=>h("th",{},c)))),h("tbody",{},rows.map(r=>h("tr",{class:"clk",onclick:()=>onrow(r.o)},r.cells.map(c=>h("td",{},c)))))):h("div",{class:"empty"},empty)}
+TAB.areas=async v=>{
+  const {areas}=await api("/api/areas");
+  v.append(h("div",{class:"row",style:"margin-bottom:12px"},h("p",{class:"m",style:"color:var(--muted);margin:0"},"Οι τομείς είναι τα σημεία όπου γίνεται εφημερία (π.χ. Ανατολικά, Δυτικά). Η σειρά τους καθορίζει ποιοι χρησιμοποιούνται όταν χρειάζονται λιγότεροι."),h("div",{class:"sp"}),h("button",{class:"btn pri",onclick:()=>editArea(null)},"+ Νέος τομέας")));
+  v.append(h("div",{class:"card",style:"padding:6px 10px"},simpleTable(["Σειρά","Όνομα","Περιγραφή","Κατάσταση","Αναθέσεις"],areas.map(a=>({o:a,cells:[a.sort_order,h("b",{},a.name),a.description,h("span",{class:"chip "+(a.active?"ok":"")},a.active?"ενεργός":"ανενεργός"),a.used]})),editArea,"Δεν υπάρχουν τομείς.")))};
+function editArea(a){
+  const st={id:a?.id,name:a?.name||"",description:a?.description||"",active:a?a.active:1,sort_order:a?a.sort_order:0};
+  const name=h("input",{type:"text",value:st.name,style:"width:100%"}),desc=h("textarea",{rows:3,style:"width:100%"});desc.value=st.description;
+  const ord=h("input",{type:"number",min:0,max:99,value:st.sort_order,style:"width:90px"});
+  const foot=[];
+  if(a)foot.push(h("button",{class:"btn danger",onclick:()=>{if(confirm(a.used?`Ο τομέας «${a.name}» έχει ${a.used} αναθέσεις στο πρόγραμμα. Να διαγραφεί παρόλα αυτά;`:"Να διαγραφεί ο τομέας;"))guard(async()=>{await api("/api/area/delete",{id:a.id});closeDrawer();route()})}},"Διαγραφή"));
+  foot.push(h("div",{class:"sp"}),h("button",{class:"btn",onclick:closeDrawer},"Άκυρο"),saveBtn(async()=>{await api("/api/area/save",{...st,name:name.value,description:desc.value,sort_order:+ord.value});closeDrawer();toast("Αποθηκεύτηκε");route()}));
+  openDrawer(a?a.name:"Νέος τομέας","",[fld("Όνομα τομέα",name),h("div",{style:"height:12px"}),fld("Περιγραφή",desc),h("div",{class:"row",style:"margin-top:14px"},chk("Ενεργός",st.active,v=>st.active=v?1:0),h("div",{class:"sp"}),fld("Σειρά",ord))],foot);setTimeout(()=>name.focus(),50)}
+TAB.intervals=async v=>{
+  const {intervals}=await api("/api/intervals");
+  v.append(h("div",{class:"row",style:"margin-bottom:12px"},h("p",{class:"m",style:"color:var(--muted);margin:0"},"Οι χρονικές ζώνες (προσέλευση, διαλείμματα, αποχώρηση) στις οποίες γίνεται εφημερία."),h("div",{class:"sp"}),
+    h("button",{class:"btn",onclick:()=>{if(confirm("Θα αντικατασταθούν οι ζώνες με την προεπιλογή (Προσέλευση, 3 διαλείμματα, Αποχώρηση). Το ήδη παραχθέν πρόγραμμα δεν αλλάζει. Να συνεχίσω;"))guard(async()=>{await api("/api/intervals/reset",{});toast("Εφαρμόστηκε η προεπιλογή");route()})}},"Προεπιλογή"),
+    h("button",{class:"btn pri",onclick:()=>editInterval(null)},"+ Νέα ζώνη")));
+  v.append(h("div",{class:"card",style:"padding:6px 10px"},simpleTable(["Σειρά","Όνομα","Ώρες","Κατάσταση"],intervals.map(i=>({o:i,cells:[i.sort_order,h("b",{},i.name),i.start+" – "+i.end,h("span",{class:"chip "+(i.active?"ok":"")},i.active?"ενεργή":"ανενεργή")]})),editInterval,"Δεν υπάρχουν ζώνες.")))};
+function editInterval(i){
+  const st={id:i?.id,active:i?i.active:1};
+  const name=h("input",{type:"text",value:i?.name||"",style:"width:100%"}),a=h("input",{type:"time",value:i?.start||""}),z=h("input",{type:"time",value:i?.end||""}),ord=h("input",{type:"number",min:0,max:99,value:i?i.sort_order:0,style:"width:90px"});
+  const foot=[];if(i)foot.push(h("button",{class:"btn danger",onclick:()=>{if(confirm("Να διαγραφεί η ζώνη;"))guard(async()=>{await api("/api/interval/delete",{id:i.id});closeDrawer();route()})}},"Διαγραφή"));
+  foot.push(h("div",{class:"sp"}),h("button",{class:"btn",onclick:closeDrawer},"Άκυρο"),saveBtn(async()=>{await api("/api/interval/save",{...st,name:name.value,start:a.value,end:z.value,sort_order:+ord.value});closeDrawer();toast("Αποθηκεύτηκε");route()}));
+  openDrawer(i?i.name:"Νέα χρονική ζώνη","",[fld("Όνομα",name),h("div",{class:"row",style:"margin-top:12px"},fld("Από",a),fld("Έως",z)),h("div",{class:"row",style:"margin-top:14px"},chk("Ενεργή",st.active,v=>st.active=v?1:0),h("div",{class:"sp"}),fld("Σειρά",ord))],foot);setTimeout(()=>name.focus(),50)}
+TAB.days=async v=>{
+  const [{exceptions,types},{intervals}]=await Promise.all([api("/api/exceptions"),api("/api/intervals")]);
+  const sum=e=>{const z=Object.entries(e.config||{}).map(([k,c])=>k+" ×"+c.count);return z.length?z.join(", "):(e.type==="Χωρίς εφημερία"?"καμία εφημερία":"")};
+  v.append(h("div",{class:"row",style:"margin-bottom:12px"},h("p",{class:"m",style:"color:var(--muted);margin:0"},"Αργίες, εκδρομές, ημίωρα ή ημέρες με ειδικό πρόγραμμα. Ισχύουν για μία ημέρα ή για διάστημα."),h("div",{class:"sp"}),h("button",{class:"btn pri",onclick:()=>editExc(null,types,intervals)},"+ Νέα ειδική ημέρα")));
+  v.append(h("div",{class:"card",style:"padding:6px 10px"},simpleTable(["Ημερομηνία","Περιγραφή","Τύπος","Εφημερία"],exceptions.map(e=>({o:e,cells:[e.from===e.to?fmt(e.from):fmt(e.from)+" – "+fmt(e.to),h("b",{},e.label),h("span",{class:"chip"},e.type),sum(e)]})),e=>editExc(e,types,intervals),"Δεν υπάρχουν ειδικές ημέρες.")))};
+function editExc(e,types,intervals){
+  const st={id:e?.id,type:e?.type||"Χωρίς εφημερία",range:!!(e&&e.from!==e.to),cfg:JSON.parse(JSON.stringify(e?.config||{}))};
+  const from=h("input",{type:"date",value:e?.from||""}),to=h("input",{type:"date",value:e?.to||""}),label=h("input",{type:"text",value:e?.label||"",style:"width:100%"});
+  from.onchange=()=>{if(!st.range||!to.value||to.value<from.value)to.value=from.value};
+  const body=h("div");
+  function draw(){
+    const zones=intervals.filter(i=>i.active).map(i=>{const on=!!st.cfg[i.name]?.active;const cnt=h("input",{type:"number",min:1,max:10,value:st.cfg[i.name]?.count||(/αποχώ/i.test(i.name)?1:2),style:"width:64px",onchange:ev=>{(st.cfg[i.name]??={active:true}).count=+ev.target.value}});
+      return h("div",{class:"row",style:"margin-bottom:6px"},chk(i.name+" ("+i.start+"–"+i.end+")",on,v=>{if(v)st.cfg[i.name]={active:true,count:+cnt.value};else delete st.cfg[i.name];draw()}),h("div",{class:"sp"}),on?h("span",{class:"m",style:"color:var(--muted)"},"θέσεις: "):null,on?cnt:null)});
+    body.replaceChildren(
+      h("div",{class:"row"},h("button",{class:"btn sm"+(!st.range?" pri":""),onclick:()=>{st.range=false;to.value=from.value;draw()}},"Μία ημέρα"),h("button",{class:"btn sm"+(st.range?" pri":""),onclick:()=>{st.range=true;draw()}},"Διάστημα")),
+      h("div",{class:"row",style:"margin-top:12px"},fld(st.range?"Από":"Ημερομηνία",from),st.range?fld("Έως",to):null),
+      h("div",{style:"margin-top:12px"},fld("Περιγραφή (π.χ. 28η Οκτωβρίου)",label)),
+      h("div",{style:"margin-top:12px"},fld("Τύπος",h("select",{onchange:ev=>{st.type=ev.target.value;draw()}},types.map(t=>h("option",{value:t,selected:t===st.type},t))))),
+      st.type==="Χωρίς εφημερία"?h("p",{class:"m",style:"color:var(--muted)"},"Την ημέρα αυτή δεν γίνεται εφημερία."):h("div",{style:"margin-top:14px"},h("h2",{},"Ειδικό πρόγραμμα ζωνών (προαιρετικό)"),h("p",{class:"m",style:"color:var(--muted);margin-top:-6px"},"Επίλεξε σε ποιες ζώνες γίνεται εφημερία εκείνη την ημέρα και πόσες θέσεις. Αν δεν επιλέξεις καμία, ισχύει το κανονικό πρόγραμμα."),zones))}
+  draw();
+  const foot=[];if(e)foot.push(h("button",{class:"btn danger",onclick:()=>{if(confirm("Να διαγραφεί η ειδική ημέρα;"))guard(async()=>{await api("/api/exception/delete",{id:e.id});closeDrawer();route()})}},"Διαγραφή"));
+  foot.push(h("div",{class:"sp"}),h("button",{class:"btn",onclick:closeDrawer},"Άκυρο"),saveBtn(async()=>{await api("/api/exception/save",{id:st.id,from:from.value,to:st.range?to.value:from.value,label:label.value,type:st.type,config:st.cfg});closeDrawer();toast("Αποθηκεύτηκε");route()}));
+  openDrawer(e?e.label:"Νέα ειδική ημέρα","",body,foot)}
 /* Το θέμα αποθηκεύεται στη βάση της εφαρμογής (όχι στον browser), γιατί η θύρα αλλάζει σε κάθε εκκίνηση. */
 let THEME="auto";
 function themeNow(){return THEME}

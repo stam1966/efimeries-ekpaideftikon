@@ -675,6 +675,168 @@ class WebUI:
         self.app._save_update_state(auto=bool(b.get("auto")))
         return {"ok": True}
 
+    # ------------------------------------------------------- ρυθμίσεις (v0.62)
+    def api_settings(self, p, b):
+        db = self.db
+        return {"school_name": db.get_setting("school_name", ""), "school_phone": db.get_setting("school_phone", ""),
+                "school_email": db.get_setting("school_email", ""), "start": db.get_setting("start_date"), "end": db.get_setting("end_date"),
+                "school_year": db.get_setting("school_year")}
+
+    def api_settings_save(self, p, b):
+        start, end = self._d(str(b.get("start", ""))), self._d(str(b.get("end", "")))
+        if start > end:
+            raise ApiError("Η έναρξη δεν μπορεί να είναι μετά τη λήξη.")
+        db = self.db
+        db.set_setting("school_name", str(b.get("school_name") or "").strip())
+        db.set_setting("school_phone", str(b.get("school_phone") or "").strip())
+        db.set_setting("school_email", str(b.get("school_email") or "").strip())
+        db.set_setting("start_date", start.isoformat())
+        db.set_setting("end_date", end.isoformat())
+        try:
+            self.app.sync_school_year_fields()
+        except Exception:
+            pass
+        self.app.refresh_all()
+        return {"ok": True}
+
+    def _time_ok(self, s: str) -> str:
+        s = str(s or "").strip()
+        try:
+            self.mod.minutes_between(s, "23:59")
+        except Exception:
+            raise ApiError("Οι ώρες πρέπει να είναι της μορφής 09:40")
+        return s
+
+    def api_areas(self, p, b):
+        c = self.db.conn
+        used = {r[0]: r[1] for r in c.execute("SELECT area_name, COUNT(*) FROM assignments GROUP BY area_name")}
+        return {"areas": [{"id": r["id"], "name": r["name"], "description": r["description"] or "", "active": int(r["active"]), "sort_order": int(r["sort_order"]),
+                           "used": used.get(r["name"], 0)} for r in self.db.areas()]}
+
+    def api_area_save(self, p, b):
+        c = self.db.conn
+        name = str(b.get("name") or "").strip()
+        if not name:
+            raise ApiError("Γράψε το όνομα του τομέα")
+        data = {"name": name, "description": str(b.get("description") or "").strip(), "active": 1 if b.get("active", 1) else 0, "sort_order": int(b.get("sort_order") or 0)}
+        try:
+            if b.get("id"):
+                sid = int(b["id"])
+                row = c.execute("SELECT name FROM areas WHERE id=?", (sid,)).fetchone()
+                if not row:
+                    raise ApiError("Ο τομέας δεν βρέθηκε", 404)
+                c.execute("UPDATE areas SET name=:name,description=:description,active=:active,sort_order=:sort_order WHERE id=:id", {**data, "id": sid})
+                c.execute("UPDATE assignments SET area_name=?, area_id=? WHERE area_id=? OR area_name=?", (name, sid, sid, row["name"]))
+            else:
+                c.execute("INSERT INTO areas(name,description,active,sort_order) VALUES(:name,:description,:active,:sort_order)", data)
+            c.commit()
+        except ApiError:
+            c.rollback()
+            raise
+        except Exception as e:  # noqa: BLE001
+            c.rollback()
+            raise ApiError("Υπάρχει ήδη τομέας με αυτό το όνομα" if "UNIQUE" in str(e) else str(e))
+        self.app.refresh_all()
+        return {"ok": True}
+
+    def api_area_delete(self, p, b):
+        c = self.db.conn
+        c.execute("DELETE FROM areas WHERE id=?", (int(b.get("id", 0)),))
+        c.commit()
+        self.app.refresh_all()
+        return {"ok": True}
+
+    def api_intervals(self, p, b):
+        return {"intervals": [{"id": r["id"], "name": r["name"], "start": r["start_time"], "end": r["end_time"], "active": int(r["active"]), "sort_order": int(r["sort_order"])} for r in self.db.intervals()]}
+
+    def api_interval_save(self, p, b):
+        c = self.db.conn
+        name = str(b.get("name") or "").strip()
+        if not name:
+            raise ApiError("Γράψε το όνομα της ζώνης")
+        st, en = self._time_ok(b.get("start")), self._time_ok(b.get("end"))
+        try:
+            if self.mod.minutes_between(st, en) <= 0:
+                raise ValueError
+        except Exception:
+            raise ApiError("Η ώρα λήξης πρέπει να είναι μετά την ώρα έναρξης")
+        data = {"name": name, "start_time": st, "end_time": en, "active": 1 if b.get("active", 1) else 0, "sort_order": int(b.get("sort_order") or 0)}
+        if b.get("id"):
+            c.execute("UPDATE duty_intervals SET name=:name,start_time=:start_time,end_time=:end_time,active=:active,sort_order=:sort_order WHERE id=:id", {**data, "id": int(b["id"])})
+        else:
+            c.execute("INSERT INTO duty_intervals(name,start_time,end_time,active,sort_order) VALUES(:name,:start_time,:end_time,:active,:sort_order)", data)
+        c.commit()
+        self.app.refresh_all()
+        return {"ok": True}
+
+    def api_interval_delete(self, p, b):
+        c = self.db.conn
+        c.execute("DELETE FROM duty_intervals WHERE id=?", (int(b.get("id", 0)),))
+        c.commit()
+        self.app.refresh_all()
+        return {"ok": True}
+
+    def api_intervals_reset(self, p, b):
+        c = self.db.conn
+        c.execute("DELETE FROM duty_intervals")
+        c.executemany("INSERT INTO duty_intervals(name,start_time,end_time,active,sort_order) VALUES(?,?,?,?,?)",
+                      [("Προσέλευση", "08:00", "08:15", 1, 1), ("1ο διάλειμμα", "09:40", "10:00", 1, 2), ("2ο διάλειμμα", "11:30", "11:45", 1, 3),
+                       ("3ο διάλειμμα", "12:25", "12:35", 1, 4), ("Αποχώρηση", "13:15", "13:20", 1, 5)])
+        c.commit()
+        self.app.refresh_all()
+        return {"ok": True}
+
+    EXC_TYPES = ["Χωρίς εφημερία", "Αργία", "Σχολική γιορτή", "Εκδρομή", "Ειδική ημέρα", "Εξαίρεση", "Μόνο προσέλευση-αποχώρηση", "Ειδικό πρόγραμμα ζωνών"]
+
+    def api_exceptions(self, p, b):
+        out = []
+        for r in self.db.conn.execute("SELECT * FROM exceptions ORDER BY d").fetchall():
+            out.append({"id": r["id"], "from": r["d"], "to": r["end_d"] or r["d"], "label": r["label"], "type": r["type"], "config": self.db.exception_config(r)})
+        return {"exceptions": out, "types": self.EXC_TYPES}
+
+    def api_exception_save(self, p, b):
+        app, c = self.app, self.db.conn
+        d1 = self._d(str(b.get("from", "")))
+        d2 = self._d(str(b.get("to") or b.get("from", "")))
+        if d2 < d1:
+            raise ApiError("Η ημερομηνία «Έως» δεν μπορεί να είναι πριν από την «Από».")
+        label = str(b.get("label") or "").strip()
+        if not label:
+            raise ApiError("Συμπλήρωσε μια σύντομη περιγραφή.")
+        typ = str(b.get("type") or "Χωρίς εφημερία")
+        if typ not in self.EXC_TYPES:
+            raise ApiError("Άκυρος τύπος")
+        eid = int(b["id"]) if b.get("id") else None
+        ov = app.exception_range_overlap(d1, d2, eid)
+        if ov is not None:
+            ov_end = ov["end_d"] or ov["d"]
+            raise ApiError(f"Το διάστημα επικαλύπτεται με υπάρχουσα εγγραφή: {ov['d'][8:10]}/{ov['d'][5:7]}/{ov['d'][:4]} – {ov_end[8:10]}/{ov_end[5:7]}/{ov_end[:4]} ({ov['label']}). Επεξεργάσου πρώτα εκείνη.")
+        cfg: Dict[str, Any] = {}
+        if typ != "Χωρίς εφημερία":
+            valid = {r["name"] for r in self.db.intervals()}
+            for name, v in (b.get("config") or {}).items():
+                if name in valid and v and v.get("active"):
+                    cfg[name] = {"active": True, "count": max(1, min(10, int(v.get("count") or 1)))}
+        data = {"d": d1.isoformat(), "end_d": d2.isoformat(), "label": label, "type": typ, "config": json.dumps(cfg, ensure_ascii=False)}
+        try:
+            if eid:
+                c.execute("UPDATE exceptions SET d=:d,end_d=:end_d,label=:label,type=:type,config=:config WHERE id=:id", {**data, "id": eid})
+            else:
+                c.execute("INSERT INTO exceptions(d,end_d,label,type,config) VALUES(:d,:end_d,:label,:type,:config)", data)
+            c.commit()
+        except Exception as e:  # noqa: BLE001
+            c.rollback()
+            raise ApiError("Υπάρχει ήδη εγγραφή που ξεκινά την ίδια ημερομηνία" if "UNIQUE" in str(e) else str(e))
+        app.refresh_all()
+        return {"ok": True}
+
+    def api_exception_delete(self, p, b):
+        c = self.db.conn
+        c.execute("DELETE FROM exceptions WHERE id=?", (int(b.get("id", 0)),))
+        c.commit()
+        self.app.refresh_all()
+        return {"ok": True}
+
     # ---------------------------------------------------------------- λοιπά
     def api_classic(self, p, b):
         self.show_classic(str(b.get("tab") or ""))
