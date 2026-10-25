@@ -262,7 +262,7 @@ class WebUI:
         edge = find_edge()
         try:
             if edge:
-                subprocess.Popen([edge, f"--app={url}", "--window-size=1320,860"], close_fds=True)
+                subprocess.Popen([edge, f"--app={url}", "--start-maximized"], close_fds=True)
                 return
         except Exception:
             pass
