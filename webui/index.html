@@ -447,7 +447,7 @@ PAGE.reports=async v=>{
   const rem=h("select",{id:"ics-rem",onchange:e=>RP.remind=e.target.value},
     [["0","Χωρίς υπενθύμιση"],["30","30 λεπτά πριν"],["60","1 ώρα πριν"],["1440","1 ημέρα πριν"]].map(([k,l])=>h("option",{value:k},l)));
   rem.value=RP.remind;
-  v.append(h("h1",{},"Εκτυπώσεις και ημερολόγιο"),h("p",{class:"sub"},"Διάλεξε το διάστημα και τι θέλεις να βγάλεις. Ισχύει και για τις δύο ενότητες παρακάτω."),
+  v.append(h("h1",{},"Εκτυπώσεις, αρχεία και ημερολόγιο"),h("p",{class:"sub"},"Διάλεξε το διάστημα και τι θέλεις να βγάλεις. Ισχύει και για τις δύο ενότητες παρακάτω."),
     h("div",{class:"card"},h("h2",{},"Διάστημα"),
       h("div",{class:"row"},fld("Από",a),fld("Έως",z)),
       h("div",{class:"row",style:"margin-top:10px;flex-wrap:wrap"},
@@ -458,6 +458,12 @@ PAGE.reports=async v=>{
       h("div",{class:"row"},fld("Για ποιους",who)),
       h("p",{class:"m",style:"color:var(--muted)"},"«Ο καθένας σε ξεχωριστό φύλλο»: κάθε εκπαιδευτικός με εφημερίες στο διάστημα παίρνει δική του σελίδα, ώστε να εκτυπωθούν όλες μαζί και να μοιραστούν."),
       h("div",{class:"row",style:"margin-top:12px"},h("button",{class:"btn pri",id:"rp-print",onclick:()=>{if(!RP.a||!RP.z||RP.a>RP.z)return toast("Έλεγξε το διάστημα");window.open("/api/print?"+q({from:RP.a,to:RP.z,who:RP.who,t:TOKEN}),"_blank")}},"Άνοιγμα για εκτύπωση"))),
+    h("div",{class:"card"},h("h2",{},"Αρχεία Excel και CSV"),
+      h("p",{class:"m",style:"color:var(--muted)"},"Κατεβαίνουν στον φάκελο λήψεων του υπολογιστή. Το Excel έχει τρία φύλλα: Πρόγραμμα, Σύνολα ανά εκπαιδευτικό και Απουσίες (όλο το σχολικό έτος)."),
+      h("div",{class:"row",style:"flex-wrap:wrap"},
+        h("button",{class:"btn pri",id:"dl-xlsx",onclick:()=>{location.href="/api/xlsx?t="+TOKEN}},"Excel (.xlsx)"),
+        h("button",{class:"btn",id:"dl-csv",onclick:()=>{location.href="/api/csv?kind=schedule&t="+TOKEN}},"Πρόγραμμα (CSV)"),
+        h("button",{class:"btn",id:"dl-csvt",onclick:()=>{location.href="/api/csv?kind=teachers&t="+TOKEN}},"Εκπαιδευτικοί (CSV)"))),
     h("div",{class:"card"},h("h2",{},"Ημερολόγιο για κινητά και Google Calendar (.ics)"),
       h("div",{class:"grid g2"},fld("Τι να περιέχει",icsWho),fld("Υπενθύμιση",rem)),
       h("div",{class:"row",style:"margin-top:12px"},h("button",{class:"btn pri",id:"ics-dl",onclick:()=>{if(!RP.a||!RP.z||RP.a>RP.z)return toast("Έλεγξε το διάστημα");location.href="/api/ics?"+q({from:RP.a,to:RP.z,who:icsWho.value,remind:RP.remind,t:TOKEN})}},"Λήψη αρχείου")),
@@ -470,7 +476,7 @@ PAGE.reports=async v=>{
 let ST={tab:"school"};
 PAGE.settings=async v=>{
   v.append(h("h1",{},"Ρυθμίσεις"),h("p",{class:"sub"},"Σχολείο, τομείς, χρονικές ζώνες, ειδικές ημέρες και εμφάνιση."));
-  const tabs=[["school","Σχολείο"],["areas","Τομείς"],["intervals","Χρονικές ζώνες"],["days","Ειδικές ημέρες"],["storage","Αποθήκευση"],["app","Εφαρμογή"]];
+  const tabs=[["school","Σχολείο"],["areas","Τομείς"],["intervals","Χρονικές ζώνες"],["days","Ειδικές ημέρες"],["storage","Αποθήκευση"],["backup","Αντίγραφα"],["app","Εφαρμογή"]];
   v.append(h("div",{class:"seg",style:"margin-bottom:16px;flex-wrap:wrap"},tabs.map(([k,l])=>h("button",{class:ST.tab===k?"on":"",onclick:()=>{ST.tab=k;route()}},l))));
   const box=h("div");v.append(box);await TAB[ST.tab](box)};
 const fld=(l,inp)=>h("label",{class:"f"},l,inp);
@@ -483,8 +489,35 @@ TAB.school=async v=>{
   v.append(h("div",{class:"card"},h("h2",{},"Στοιχεία σχολείου"),h("div",{class:"grid g2"},fld("Ονομασία σχολείου",name),h("div",{}),fld("Τηλέφωνο",phone),fld("Email",mail)),
     h("h2",{style:"margin-top:18px"},"Σχολικό έτος "+g.school_year),h("div",{class:"row"},fld("Έναρξη μαθημάτων",a),fld("Λήξη μαθημάτων",z)),
     h("div",{class:"row",style:"margin-top:16px"},saveBtn(async()=>{await api("/api/settings/save",{school_name:name.value,school_phone:phone.value,school_email:mail.value,start:a.value,end:z.value});toast("Αποθηκεύτηκε");route()})),
-    h("p",{class:"m",style:"color:var(--muted)"},"Αλλαγή σχολικού έτους και backup: Εφαρμογή → «Για προχωρημένους».")))};
+    h("p",{class:"m",style:"color:var(--muted)"},"Αλλαγή σχολικού έτους: Εφαρμογή → «Για προχωρημένους». Αντίγραφα ασφαλείας: καρτέλα «Αντίγραφα».")))};
 function simpleTable(cols,rows,onrow,empty){return rows.length?h("table",{},h("thead",{},h("tr",{},cols.map(c=>h("th",{},c)))),h("tbody",{},rows.map(r=>h("tr",{class:"clk",onclick:()=>onrow(r.o)},r.cells.map(c=>h("td",{},c)))))):h("div",{class:"empty"},empty)}
+TAB.backup=async v=>{
+  const L=await api("/api/backup/list");
+  const fmtBytes=n=>n>1048576?(n/1048576).toFixed(1)+" MB":Math.max(1,Math.round(n/1024))+" KB";
+  async function sendRaw(path,file){
+    let r;try{r=await fetch(path,{method:"POST",headers:{"X-Token":TOKEN,"Content-Type":"application/octet-stream"},body:file})}catch(e){throw new Error("Η εφαρμογή δεν ανταποκρίνεται.")}
+    const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||("Σφάλμα "+r.status));return j}
+  function askText(i){return "Backup σχολικού έτους "+i.school_year+(i.created_at?" (δημιουργήθηκε "+i.created_at.replace("T"," ")+")":"")+".\n\n"+
+    (i.exists?"Το έτος "+i.school_year+" υπάρχει ήδη στον υπολογιστή και θα ΑΝΤΙΚΑΤΑΣΤΑΘΕΙ ΟΛΟ με το backup. Θα δημιουργηθεί πρώτα αυτόματο αντίγραφο ασφαλείας.":"Το σχολικό έτος "+i.school_year+" θα προστεθεί και θα ανοίξει.")+
+    (i.newer?"\n\nΠροσοχή: το backup έγινε από νεότερη έκδοση ("+i.app_version+") και μπορεί να μην λειτουργεί σωστά.":"")+"\n\nΝα συνεχιστεί;"}
+  const done=r=>{toast("Η επαναφορά του σχολικού έτους "+r.info.school_year+" ολοκληρώθηκε.",6000);S=null;route()};
+  const file=h("input",{type:"file",accept:".efbackup,.zip",style:"display:none",id:"bk-file",onchange:e=>guard(async()=>{
+    const f=e.target.files[0];if(!f)return;
+    const ins=await sendRaw("/api/backup/inspect",f);
+    if(!confirm(askText(ins.info))){e.target.value="";return}
+    done(await sendRaw("/api/backup/restore",f))},e.target)});
+  const rows=L.items.map(it=>({o:it,cells:[it.when,it.year,({"before-restore":"πριν από επαναφορά","exit":"κατά το κλείσιμο","generate":"πριν από παραγωγή","undo":"πριν από αναίρεση","lock-past":"πριν από κλείδωμα πραγματοποιημένων","delete-schedule":"πριν από διαγραφή προγράμματος","delete-year":"πριν από διαγραφή έτους","import-csv":"πριν από εισαγωγή CSV"})[it.reason]||it.reason,fmtBytes(it.size),
+    h("button",{class:"btn sm",onclick:e=>{e.stopPropagation();guard(async()=>{
+      if(!confirm("Να γίνει επαναφορά του σχολικού έτους "+it.year+" από το αντίγραφο της "+it.when+";\nΤο τρέχον έτος θα αντικατασταθεί (θα γίνει πρώτα νέο αυτόματο αντίγραφο)."))return;
+      done(await api("/api/backup/restore_auto",{name:it.name}))},e.currentTarget)}},"Επαναφορά")]}));
+  v.append(h("div",{class:"card"},h("h2",{},"Πλήρες αντίγραφο ασφαλείας"),
+      h("p",{class:"m",style:"color:var(--muted)"},"Αρχείο .efbackup με όλα τα δεδομένα του τρέχοντος σχολικού έτους ("+L.year+"). Φύλαξέ το σε USB ή στο cloud πριν από μεγάλες αλλαγές ή αναβάθμιση."),
+      h("div",{class:"row",style:"flex-wrap:wrap"},
+        h("button",{class:"btn pri",id:"bk-dl",onclick:()=>{location.href="/api/backup?t="+TOKEN}},"Λήψη αντιγράφου"),
+        h("button",{class:"btn",id:"bk-up",onclick:()=>file.click()},"Επαναφορά από αρχείο…"),file)),
+    h("div",{class:"card"},h("h2",{},"Αυτόματα αντίγραφα"),
+      h("p",{class:"m",style:"color:var(--muted)"},"Η εφαρμογή κρατά μόνη της αντίγραφα πριν από ενέργειες που σβήνουν ή αντικαθιστούν δεδομένα. Φάκελος: "+L.folder),
+      simpleTable(["Πότε","Έτος","Αιτία","Μέγεθος",""],rows,()=>{},"Δεν υπάρχουν ακόμη αυτόματα αντίγραφα.")))};
 TAB.storage=async v=>{
   const s=await api("/api/storage");
   const inp=h("input",{type:"text",value:"",placeholder:String.raw`π.χ. \\server\koinos\Efimeries  ή  D:\Efimeries`,style:"flex:1;min-width:280px"});
@@ -569,6 +602,8 @@ setInterval(()=>{fetch("/api/ping",{method:"POST",headers:{"X-Token":TOKEN}}).ca
 fetch("/api/ping",{method:"POST",headers:{"X-Token":TOKEN}}).catch(()=>{});
 addEventListener("pagehide",()=>{try{navigator.sendBeacon("/api/bye?t="+TOKEN)}catch(e){}});
 route();
+try{if(!sessionStorage.getItem("maxed")){sessionStorage.setItem("maxed","1");
+  if(window.outerWidth<screen.availWidth-60||window.outerHeight<screen.availHeight-60){window.moveTo(0,0);window.resizeTo(screen.availWidth,screen.availHeight)}}}catch(e){}
 </script>
 </body>
 </html>

@@ -38,7 +38,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 
 APP_TITLE = "Εφημερίες Εκπαιδευτικών"
-APP_VERSION = "0.64.1"
+APP_VERSION = "0.65"
 UPDATE_REPO = "stam1966/efimeries-ekpaideftikon"  # αποθετήριο GitHub από όπου ελέγχονται οι νέες εκδόσεις
 
 # Όρια εργασίας του εβδομαδιαίου σχεδιασμού (προστατεύουν από πολύ αργούς υπολογισμούς σε μεγάλα σχολεία).
@@ -8699,16 +8699,15 @@ tfoot td {{ font-weight: 700; background: #F7F7F5; }}
 </html>"""
         path.write_text(content, encoding="utf-8")
 
-    def export_xlsx(self):
-        """Εξαγωγή σε Excel: Πρόγραμμα, Σύνολα ανά εκπαιδευτικό και Απουσίες (ένα αρχείο, τρία φύλλα)."""
+    def build_xlsx(self, path) -> bool:
+        """Γράφει το αρχείο Excel (Πρόγραμμα, Σύνολα, Απουσίες). False αν δεν υπάρχει πρόγραμμα."""
         year = self.db.get_setting("school_year")
         conn = self.db.conn
         rows = conn.execute(
             "SELECT a.d,a.weekday,a.interval_name,a.start_time,a.end_time,COALESCE(ar.name,a.area_name),t.name,a.minutes,a.mode,a.locked,a.entry_type "
             "FROM assignments a JOIN teachers t ON t.id=a.teacher_id LEFT JOIN areas ar ON ar.id=a.area_id ORDER BY a.d,a.start_time,a.area_name").fetchall()
         if not rows:
-            messagebox.showinfo("Εξαγωγή σε Excel", "Δεν υπάρχει πρόγραμμα για εξαγωγή. Δημιουργήστε πρώτα πρόγραμμα.")
-            return
+            return False
         mode_gr = {"daily": "Ημέρα", "breaks": "Διάλειμμα", "shifts": "Βάρδια"}
         prog = []
         for r in rows:
@@ -8729,16 +8728,24 @@ tfoot td {{ font-weight: 700; background: #F7F7F5; }}
         for name, d1, d2, reason in conn.execute(
                 "SELECT t.name,a.d_from,a.d_to,a.reason FROM absences a JOIN teachers t ON t.id=a.teacher_id ORDER BY a.d_from,t.name").fetchall():
             ab_rows.append((name, parse_date(d1), parse_date(d2), (parse_date(d2) - parse_date(d1)).days + 1, reason or ""))
+        write_xlsx(path, [
+            ("Πρόγραμμα", ["Ημερομηνία", "Ημέρα", "Χρόνος", "Από", "Έως", "Τομέας", "Εκπαιδευτικός", "Λεπτά", "Τρόπος", "Κατάσταση"],
+             prog, [13, 12, 18, 8, 8, 18, 30, 8, 12, 18]),
+            ("Σύνολα", ["Εκπαιδευτικός", "Αναθέσεις", "Ημέρες εφημερίας", "Λεπτά", "Ώρες", "Απόκλιση ημερών από μέσο όρο"],
+             tot_rows, [32, 11, 17, 9, 9, 28]),
+            ("Απουσίες", ["Εκπαιδευτικός", "Από", "Έως", "Ημέρες", "Αιτιολογία"], ab_rows, [32, 13, 13, 9, 34]),
+        ])
+        return True
+
+    def export_xlsx(self):
+        """Εξαγωγή σε Excel: Πρόγραμμα, Σύνολα ανά εκπαιδευτικό και Απουσίες (ένα αρχείο, τρία φύλλα)."""
+        year = self.db.get_setting("school_year")
         path = EXPORT_DIR / f"efimeries_{year}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
         try:
             EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-            write_xlsx(path, [
-                ("Πρόγραμμα", ["Ημερομηνία", "Ημέρα", "Χρόνος", "Από", "Έως", "Τομέας", "Εκπαιδευτικός", "Λεπτά", "Τρόπος", "Κατάσταση"],
-                 prog, [13, 12, 18, 8, 8, 18, 30, 8, 12, 18]),
-                ("Σύνολα", ["Εκπαιδευτικός", "Αναθέσεις", "Ημέρες εφημερίας", "Λεπτά", "Ώρες", "Απόκλιση ημερών από μέσο όρο"],
-                 tot_rows, [32, 11, 17, 9, 9, 28]),
-                ("Απουσίες", ["Εκπαιδευτικός", "Από", "Έως", "Ημέρες", "Αιτιολογία"], ab_rows, [32, 13, 13, 9, 34]),
-            ])
+            if not self.build_xlsx(path):
+                messagebox.showinfo("Εξαγωγή σε Excel", "Δεν υπάρχει πρόγραμμα για εξαγωγή. Δημιουργήστε πρώτα πρόγραμμα.")
+                return
         except Exception as exc:
             LOG.exception("Αποτυχία εξαγωγής xlsx")
             messagebox.showerror("Εξαγωγή σε Excel", f"Η εξαγωγή απέτυχε:\n{exc}")

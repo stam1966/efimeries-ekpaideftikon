@@ -148,13 +148,17 @@ class WebUI:
                 body: Dict[str, Any] = {}
                 if method == "POST":
                     n = int(self.headers.get("Content-Length") or 0)
-                    if n > 2_000_000:
-                        return self._json(413, {"error": "too large"})
+                    is_raw = u.path.startswith("/api/backup/") and (self.headers.get("Content-Type") or "").startswith("application/octet-stream")
+                    if n > (80_000_000 if is_raw else 2_000_000):
+                        return self._json(413, {"error": "Το αρχείο είναι πολύ μεγάλο"})
                     raw = self.rfile.read(n) if n else b""
-                    try:
-                        body = json.loads(raw.decode("utf-8")) if raw else {}
-                    except Exception:
-                        return self._json(400, {"error": "bad json"})
+                    if is_raw:
+                        body = {"_raw": raw}
+                    else:
+                        try:
+                            body = json.loads(raw.decode("utf-8")) if raw else {}
+                        except Exception:
+                            return self._json(400, {"error": "bad json"})
                 params = {k: v[0] for k, v in qs.items()}
                 if u.path == "/api/ping":
                     outer.last_ping = time.time()
@@ -983,6 +987,131 @@ class WebUI:
             self.app.change_storage_root(selected=path, copy_data=bool(b.get("copy")))
         self.app.refresh_all()
         return {"ok": True, "root": str(self.mod.STORAGE_ROOT), "changed": str(self.mod.STORAGE_ROOT) != before, "messages": cap.messages}
+
+    # ------------------------------------------------- αρχεία και backup (v0.65)
+    def api_xlsx(self, p, b):
+        m = self.mod
+        year = self.db.get_setting("school_year")
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "x.xlsx"
+            if not self.app.build_xlsx(path):
+                raise ApiError("Δεν υπάρχει πρόγραμμα για εξαγωγή. Δημιούργησε πρώτα πρόγραμμα.")
+            data = path.read_bytes()
+        return ("file", f"efimeries_{year}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx", data,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    def _csv_bytes(self, headers, rows) -> bytes:
+        import csv
+        import io
+        buf = io.StringIO(newline="")
+        w = csv.writer(buf, delimiter=";")
+        w.writerow(headers)
+        for r in rows:
+            w.writerow(list(r))
+        return buf.getvalue().encode("utf-8-sig")
+
+    def api_csv(self, p, b):
+        m = self.mod
+        kind = p.get("kind", "schedule")
+        stamp = datetime.now().strftime("%Y%m%d_%H%M")
+        if kind == "teachers":
+            app = self.app
+            out = []
+            for t in self.db.teachers():
+                out.append((t.name, app.yesno(t.participates), app.yesno(t.active), app.yesno(t.mon), app.yesno(t.tue), app.yesno(t.wed), app.yesno(t.thu), app.yesno(t.fri),
+                            app.day_name(t.primary_day), app.day_name(t.alternate_day),
+                            " | ".join(app.day_name(wd) for wd in self.db.teacher_alternate_days(t.id, t.alternate_day)), app.yesno(t.extra_cycle), t.notes))
+            data = self._csv_bytes(["Ονοματεπώνυμο", "Συμμετέχει", "Ενεργός", "Δευτέρα", "Τρίτη", "Τετάρτη", "Πέμπτη", "Παρασκευή", "Κύρια ημέρα", "Εναλλακτική ημέρα", "Εναλλακτικές ημέρες", "Πρόσθετος κύκλος", "Παρατηρήσεις"], out)
+            return ("file", f"teachers_{stamp}.csv", data, "text/csv; charset=utf-8")
+        rows = self.db.conn.execute("SELECT a.d,a.weekday,a.interval_name,a.start_time,a.end_time,a.area_name,t.name,a.minutes,a.mode,a.locked,a.entry_type FROM assignments a JOIN teachers t ON t.id=a.teacher_id ORDER BY a.d,a.start_time,a.area_name").fetchall()
+        out = []
+        for r in rows:
+            status = "Πραγματοποιημένο" if r[10] == "manual_completed" else ("Κλειδωμένο" if r[9] else "Μελλοντικό")
+            out.append((r[0], m.fmt_date(r[0]), r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], int(r[9]), r[10], status))
+        data = self._csv_bytes(["date_iso", "Ημερομηνία", "Ημέρα", "Χρόνος", "Από", "Έως", "Τομέας", "Εκπαιδευτικός", "Λεπτά", "Τρόπος", "locked", "entry_type", "Κατάσταση"], out)
+        return ("file", f"program_{self.db.get_setting('school_year')}_{stamp}.csv", data, "text/csv; charset=utf-8")
+
+    def api_backup(self, p, b):
+        sy = self.db.get_setting("school_year", self.app.active_school_year)
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "b.efbackup"
+            self.app._write_backup_zip(path, sy)
+            data = path.read_bytes()
+        return ("file", f"Efimeries_Backup_{sy}_{datetime.now().strftime('%Y%m%d_%H%M')}.efbackup", data, "application/octet-stream")
+
+    def _backup_info(self, data: bytes) -> dict:
+        import io
+        import zipfile
+        m = self.mod
+        try:
+            with zipfile.ZipFile(io.BytesIO(data), "r") as z:
+                manifest = json.loads(z.read("manifest.json").decode("utf-8"))
+                if manifest.get("format") != "efimeries-portable-backup":
+                    raise ValueError
+                dbs = [n for n in z.namelist() if n.lower().endswith(".db")]
+                if not dbs:
+                    raise ValueError
+                blob = z.read(dbs[0])
+        except Exception:
+            raise ApiError("Το αρχείο δεν είναι έγκυρο backup της εφαρμογής.")
+        sy = m.normalize_school_year(manifest.get("school_year", ""))
+        problem = m.validate_backup_db(blob)
+        if problem:
+            raise ApiError(problem)
+        return {"school_year": sy, "created_at": manifest.get("created_at", ""), "app_version": manifest.get("app_version", ""),
+                "newer": m.version_tuple(manifest.get("app_version", "0")) > m.version_tuple(m.APP_VERSION),
+                "exists": m.year_db_path(sy).exists(), "active": sy == self.app.active_school_year, "_blob": blob}
+
+    def _do_restore(self, data: bytes, confirm: bool) -> dict:
+        m, app = self.mod, self.app
+        info = self._backup_info(data)
+        blob = info.pop("_blob")
+        if not confirm:
+            return {"info": info, "restored": False}
+        target = m.year_db_path(info["school_year"])
+        app.auto_backup("before-restore")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(".restore.tmp")
+        if info["active"]:
+            app.db.close()
+            tmp.write_bytes(blob)
+            os.replace(tmp, target)
+            app.db = m.DB(target, info["school_year"])
+            app.sync_school_year_fields()
+            app.refresh_all()
+        else:
+            tmp.write_bytes(blob)
+            os.replace(tmp, target)
+            chk = m.DB(target, info["school_year"])
+            chk.close()
+            app.switch_school_year(info["school_year"], show_message=False)
+        return {"info": info, "restored": True}
+
+    def api_backup_inspect(self, p, b):
+        return self._do_restore(b.get("_raw") or b"", False)
+
+    def api_backup_restore(self, p, b):
+        return self._do_restore(b.get("_raw") or b"", True)
+
+    def _auto_dir(self) -> Path:
+        return Path(self.mod.BACKUP_DIR) / "auto"
+
+    def api_backup_list(self, p, b):
+        folder = self._auto_dir()
+        items = []
+        if folder.exists():
+            for f in sorted(folder.glob("Efimeries_Auto_*.efbackup"), key=lambda x: x.stat().st_mtime, reverse=True)[:20]:
+                parts = f.stem.split("_")
+                items.append({"name": f.name, "year": parts[2] if len(parts) > 2 else "", "reason": parts[3] if len(parts) > 3 else "",
+                              "when": datetime.fromtimestamp(f.stat().st_mtime).strftime("%Y-%m-%d %H:%M"), "size": f.stat().st_size})
+        return {"items": items, "folder": str(self._auto_dir()), "year": self.app.active_school_year}
+
+    def api_backup_restore_auto(self, p, b):
+        name = os.path.basename(str(b.get("name", "")))
+        f = self._auto_dir() / name
+        if not name.startswith("Efimeries_Auto_") or not f.is_file():
+            raise ApiError("Δεν βρέθηκε το αντίγραφο")
+        return self._do_restore(f.read_bytes(), True)
 
     # ---------------------------------------------------------------- λοιπά
     def api_classic(self, p, b):
