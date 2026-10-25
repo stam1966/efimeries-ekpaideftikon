@@ -38,7 +38,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 
 APP_TITLE = "Εφημερίες Εκπαιδευτικών"
-APP_VERSION = "0.51.1"
+APP_VERSION = "0.52"
 UPDATE_REPO = "stam1966/efimeries-ekpaideftikon"  # αποθετήριο GitHub από όπου ελέγχονται οι νέες εκδόσεις
 
 # Όρια εργασίας του εβδομαδιαίου σχεδιασμού (προστατεύουν από πολύ αργούς υπολογισμούς σε μεγάλα σχολεία).
@@ -3317,9 +3317,39 @@ class EfimeriesApp(tk.Tk):
         self._refresh_gen_scope = refresh_scope
         refresh_scope()
 
-        actions = ttk.LabelFrame(f, text="3 · Εκτέλεση", padding=10)
+        rules = ttk.LabelFrame(f, text="3 · Προτεραιότητες (προαιρετικό)", padding=10)
+        rules.pack(fill="x", pady=(0, 10))
+        self.stay_var = tk.BooleanVar(value=self.stay_enabled())
+        def _save_stay(*_a):
+            self.db.set_setting("stay_in_place", "1" if self.stay_var.get() else "0")
+        self.stay_var.trace_add("write", _save_stay)
+        ttk.Checkbutton(rules, text="Μείνε στη θέση σου: στην αναδημιουργία κράτα όσες εφημερίες γίνεται όπως ήταν", variable=self.stay_var).pack(anchor="w")
+        grid = ttk.Frame(rules)
+        grid.pack(anchor="w", pady=(8, 0))
+        self.weight_vars = {}
+        for r_i, (key, label) in enumerate((
+            ("w_stay", "Σταθερότητα (να μη μετακινούνται οι υπάρχουσες)"),
+            ("w_day", "Κύρια / εναλλακτική ημέρα του εκπαιδευτικού"),
+            ("w_fair_year", "Ισοκατανομή ετήσιου φορτίου"),
+            ("w_fair_week", "Ισοκατανομή μέσα στην εβδομάδα"),
+        )):
+            var = tk.StringVar(value=str(self.rule_weight(key)))
+            self.weight_vars[key] = var
+            def _save_w(*_a, _k=key, _v=var):
+                try:
+                    self.db.set_setting(_k, str(max(0, min(5, int(_v.get())))))
+                except ValueError:
+                    pass
+            var.trace_add("write", _save_w)
+            ttk.Label(grid, text=label).grid(row=r_i, column=0, sticky="w", padx=(0, 12), pady=2)
+            ttk.Spinbox(grid, from_=0, to=5, width=4, textvariable=var).grid(row=r_i, column=1, pady=2)
+        ttk.Label(rules, text="Κλίμακα 0–5 (0 = αγνόηση, 5 = πολύ σημαντικό). Πάντα υποχρεωτικά, δεν αλλάζουν: διαθεσιμότητα, απουσίες, μία εφημερία ανά ημέρα/ζώνη, αριθμός θέσεων ανά τομέα.",
+                  foreground="#5F6B76", wraplength=1000, justify="left").pack(anchor="w", pady=(8, 0))
+
+        actions = ttk.LabelFrame(f, text="4 · Εκτέλεση", padding=10)
         actions.pack(fill="x", pady=(0, 10))
         ttk.Button(actions, text="Δημιουργία / αναδημιουργία προγράμματος", style="Accent.TButton", command=self.generate_schedule).pack(side="left")
+        ttk.Button(actions, text="Διάγνωση συγκρούσεων…", command=self.show_conflict_diagnosis).pack(side="left", padx=10)
         ttk.Button(actions, text="Διαγραφή προγράμματος…", style="Danger.TButton", command=self.delete_schedule_dialog).pack(side="left", padx=10)
 
         result_box = ttk.LabelFrame(f, text="Αποτέλεσμα / έλεγχος", padding=8)
@@ -5389,21 +5419,23 @@ class EfimeriesApp(tk.Tk):
                 vals.append(val)
             return (max(vals) - min(vals)) if vals else 0
 
-        if fairness_focus:
-            candidates.sort(key=lambda t: (
-                annual_spread_if(t),
-                total_minutes.get(t.id, 0) + assignment_minutes,
-                week_minutes.get((t.id, week_key), 0) + assignment_minutes,
-                t.name,
-            ))
-        else:
-            candidates.sort(key=lambda t: (
-                annual_spread_if(t),
-                total_minutes.get(t.id, 0) + assignment_minutes,
-                week_minutes.get((t.id, week_key), 0) + assignment_minutes,
-                area_penalty(t),
-                t.name,
-            ))
+        # v0.52: η σειρά των κριτηρίων ακολουθεί τις προτεραιότητες του χρήστη (0 = αγνόηση).
+        # Με τις προεπιλογές (έτος 5 > εβδομάδα 3) η σειρά είναι ίδια με των προηγούμενων εκδόσεων.
+        crit = []
+        w_year, w_week = self.rule_weight("w_fair_year"), self.rule_weight("w_fair_week")
+        if w_year > 0:
+            crit.append((w_year, 0, lambda t: (annual_spread_if(t), total_minutes.get(t.id, 0) + assignment_minutes)))
+        if w_week > 0:
+            crit.append((w_week, 1, lambda t: (week_minutes.get((t.id, week_key), 0) + assignment_minutes,)))
+        crit.sort(key=lambda c: (-c[0], c[1]))
+        def _key(t):
+            k = ()
+            for _w, _o, fn in crit:
+                k += fn(t)
+            if not fairness_focus:
+                k += (area_penalty(t),)
+            return k + (t.name,)
+        candidates.sort(key=_key)
         return candidates[0]
 
     def build_area_rotation_state(self, teachers: List[Teacher], areas: List[sqlite3.Row], regenerate_from: date, mode: str):
@@ -6302,6 +6334,10 @@ class EfimeriesApp(tk.Tk):
             return
 
         try:
+            _old_snapshot = self._snapshot_old_assignments(generate_from, generate_to) if self.stay_enabled() else []
+        except Exception:
+            _old_snapshot = []
+        try:
             if scope == "continue":
                 deleted = self._delete_assignments(generate_from, None, include_locked=False)
                 action_text = f"Συνέχιση/ανακατανομή από {fmt_date(generate_from)} με διατήρηση κλειδωμένων"
@@ -6427,6 +6463,14 @@ class EfimeriesApp(tk.Tk):
         elif mode == "breaks" and rows:
             rows, balance_changes, balance_delta = self.balance_break_rows(rows, teachers, intervals, total_minutes)
 
+        stay_info = None
+        if rows and _old_snapshot and mode in ("daily", "breaks"):
+            try:
+                rows, _k0, _k1, _n = self._stay_in_place_pass(rows, _old_snapshot, teachers, intervals, mode)
+                stay_info = (_k0, _k1, _n, len(_old_snapshot))
+            except Exception:
+                LOG.exception("Αποτυχία περάσματος «μείνε στη θέση σου»")
+
         if mode == "shifts":
             self.db.conn.executemany(
                 "INSERT INTO assignments(d,weekday,interval_name,start_time,end_time,area_name,teacher_id,minutes,mode,area_id) VALUES(?,?,?,?,?,?,?,?,?,?)",
@@ -6515,7 +6559,241 @@ class EfimeriesApp(tk.Tk):
             self.generate_text.insert("end", "\nΠροσοχή — χρειάζεται έλεγχος:\n")
             for x in no_candidate[:50]:
                 self.generate_text.insert("end", f"- {x}\n")
+        if stay_info:
+            _k0, _k1, _n, _o = stay_info
+            self.generate_text.insert("end", f"\nΜείνε στη θέση σου: {_k1} από {_n} εφημερίες έμειναν ακριβώς όπως ήταν (πριν την προσαρμογή: {_k0}).\n")
+        if no_candidate and mode in ("daily", "breaks"):
+            try:
+                diag = self.diagnose_conflicts(generate_from, generate_to, mode)
+            except Exception:
+                LOG.exception("Αποτυχία διάγνωσης συγκρούσεων")
+                diag = []
+            if diag:
+                self.generate_text.insert("end", "\nΔιάγνωση συγκρούσεων (γιατί έμειναν κενές θέσεις):\n")
+                for line in diag[:30]:
+                    self.generate_text.insert("end", line + "\n")
         self._gen_created = len(rows)
+
+    # ======================================================================================
+    #  v0.52: ρυθμιζόμενες προτεραιότητες, «μείνε στη θέση σου», διάγνωση συγκρούσεων
+    # ======================================================================================
+    RULE_DEFAULTS = {"w_stay": 3, "w_day": 4, "w_fair_year": 5, "w_fair_week": 3}
+
+    def rule_weight(self, key: str) -> int:
+        try:
+            v = int(self.db.get_setting(key, str(self.RULE_DEFAULTS[key])))
+        except (TypeError, ValueError):
+            v = self.RULE_DEFAULTS[key]
+        return max(0, min(5, v))
+
+    def stay_enabled(self) -> bool:
+        return self.db.get_setting("stay_in_place", "1") == "1"
+
+    def _snapshot_old_assignments(self, d_from: date, d_to: date) -> list:
+        return self.db.conn.execute(
+            "SELECT d,interval_name,start_time,end_time,area_name,teacher_id FROM assignments WHERE d BETWEEN ? AND ?",
+            (d_from.isoformat(), d_to.isoformat()),
+        ).fetchall()
+
+    def _stay_in_place_pass(self, rows, old, teachers, intervals, mode):
+        """Ανταλλαγές εκπαιδευτικών ΜΕΣΑ στην ίδια εβδομάδα (ίδια λεπτά) ώστε όσες εφημερίες
+        γίνεται να μείνουν όπως ήταν πριν την αναδημιουργία. Οι ανταλλαγές δεν αλλάζουν
+        τα σύνολα ανά εκπαιδευτικό, άρα δεν χαλούν την ισοκατανομή· σέβονται διαθεσιμότητα,
+        απουσίες και «μία εφημερία ανά ημέρα/ζώνη». Επιστρέφει (rows, κρατήθηκαν_πριν, κρατήθηκαν_μετά, σύνολο)."""
+        if not rows or not old or mode not in ("daily", "breaks"):
+            return rows, 0, 0, len(rows)
+        w_stay, w_day = self.rule_weight("w_stay"), self.rule_weight("w_day")
+        rows = [list(r) for r in rows]
+        old_exact = {(o["d"], o["interval_name"], o["start_time"], o["end_time"], o["area_name"]): o["teacher_id"] for o in old}
+        old_slot: Dict[tuple, set] = {}
+        for o in old:
+            old_slot.setdefault((o["d"], o["interval_name"], o["start_time"], o["end_time"]), set()).add(o["teacher_id"])
+
+        def kept_count() -> int:
+            return sum(1 for r in rows if old_exact.get((r[0], r[2], r[3], r[4], r[5])) == r[6])
+        before = kept_count()
+        if w_stay <= 0:
+            return [tuple(r) for r in rows], before, before, len(rows)
+
+        tmap = {t.id: t for t in teachers}
+        alts = {t.id: self.db.teacher_alternate_days(t.id, getattr(t, "alternate_day", -1)) for t in teachers}
+        iv_id = {(r["name"], r["start_time"], r["end_time"]): r["id"] for r in intervals}
+        daily = (mode == "daily")
+
+        def slot_key(r):
+            return (r[0],) if daily else (r[0], r[2], r[3], r[4])
+
+        occ: Dict[tuple, int] = {}
+        for r in rows:
+            k = (slot_key(r), r[6]); occ[k] = occ.get(k, 0) + 1
+        if rows:
+            lo, hi = min(r[0] for r in rows), max(r[0] for r in rows)
+            for e in self.db.conn.execute("SELECT d,interval_name,start_time,end_time,teacher_id FROM assignments WHERE d BETWEEN ? AND ?", (lo, hi)).fetchall():
+                k = (((e["d"],) if daily else (e["d"], e["interval_name"], e["start_time"], e["end_time"])), e["teacher_id"])
+                occ[k] = occ.get(k, 0) + 1
+
+        def score(r, tid) -> int:
+            if old_exact.get((r[0], r[2], r[3], r[4], r[5])) == tid:
+                return 2
+            return 1 if tid in old_slot.get((r[0], r[2], r[3], r[4]), ()) else 0
+
+        def cls(tid, d_iso) -> int:
+            if not daily:
+                return 0
+            t = tmap[tid]
+            if t.primary_day < 0:
+                return 0
+            wd = parse_date(d_iso).weekday()
+            return 0 if wd == t.primary_day else (1 if wd in alts[tid] else 2)
+
+        def can_take(tid, r) -> bool:
+            t = tmap.get(tid)
+            if t is None:
+                return False
+            d = parse_date(r[0])
+            if self._is_absent(tid, d):
+                return False
+            if daily:
+                return t.available_on(d.weekday())
+            iid = iv_id.get((r[2], r[3], r[4]))
+            return iid is not None and self.db.teacher_interval_available(t, d.weekday(), iid)
+
+        def wk(r):
+            iso = parse_date(r[0]).isocalendar()
+            return (iso.year, iso.week)
+
+        by_week: Dict[tuple, List[int]] = {}
+        for i, r in enumerate(rows):
+            by_week.setdefault(wk(r), []).append(i)
+        for _pass in range(30):
+            changed = False
+            for idxs in by_week.values():
+                for a in range(len(idxs)):
+                    for b in range(a + 1, len(idxs)):
+                        r1, r2 = rows[idxs[a]], rows[idxs[b]]
+                        t1, t2 = r1[6], r2[6]
+                        if t1 == t2 or r1[7] != r2[7]:
+                            continue
+                        gain = score(r1, t2) + score(r2, t1) - score(r1, t1) - score(r2, t2)
+                        if gain <= 0:
+                            continue
+                        delta = cls(t2, r1[0]) + cls(t1, r2[0]) - cls(t1, r1[0]) - cls(t2, r2[0])
+                        if w_stay * gain - w_day * delta <= 0:
+                            continue
+                        if not (can_take(t2, r1) and can_take(t1, r2)):
+                            continue
+                        k1, k2 = slot_key(r1), slot_key(r2)
+                        if k1 != k2:
+                            if occ.get((k1, t2), 0) > 0 or occ.get((k2, t1), 0) > 0:
+                                continue
+                        # εφαρμογή
+                        occ[(k1, t1)] -= 1; occ[(k2, t2)] -= 1
+                        r1[6], r2[6] = t2, t1
+                        occ[(k1, t2)] = occ.get((k1, t2), 0) + 1; occ[(k2, t1)] = occ.get((k2, t1), 0) + 1
+                        changed = True
+            if not changed:
+                break
+        return [tuple(r) for r in rows], before, kept_count(), len(rows)
+
+    def diagnose_conflicts(self, d_from: date, d_to: date, mode: str) -> List[str]:
+        """Εξηγεί ΓΙΑΤΙ μένουν κενές θέσεις: πόσοι είναι διαθέσιμοι ανά ημέρα/ζώνη και ποιοι λείπουν."""
+        self._absent_cache = None
+        teachers = self.db.active_teachers()
+        areas = self.db.areas(True)
+        intervals = self.db.intervals(True)
+        if mode not in ("daily", "breaks") or not teachers or not areas or not intervals:
+            return []
+        cn = self.db.conn
+        groups: Dict[tuple, dict] = {}
+        for d in self.school_days():
+            if d < d_from or d > d_to:
+                continue
+            wd = d.weekday()
+            day_intervals, partial = self.intervals_for_day(d, intervals)
+            if not day_intervals:
+                continue
+            slots = []
+            if mode == "daily":
+                if partial:
+                    limits = [self.area_limit_for_interval(d, r["name"], len(areas)) for r in day_intervals]
+                    cap = max(limits) if limits else 0
+                else:
+                    cap = len(areas)
+                filled = cn.execute("SELECT COUNT(DISTINCT area_name) FROM assignments WHERE d=?", (d.isoformat(),)).fetchone()[0]
+                slots.append(("Ημερήσια εφημερία", cap, filled, lambda t, d=d, wd=wd: t.available_on(wd)))
+            else:
+                for iv in day_intervals:
+                    cap = self.area_limit_for_interval(d, iv["name"], len(areas))
+                    filled = cn.execute(
+                        "SELECT COUNT(*) FROM assignments WHERE d=? AND interval_name=? AND start_time=? AND end_time=?",
+                        (d.isoformat(), iv["name"], iv["start_time"], iv["end_time"])).fetchone()[0]
+                    slots.append((iv["name"], cap, filled, lambda t, wd=wd, iid=iv["id"]: self.db.teacher_interval_available(t, wd, iid)))
+            for label, cap, filled, avail_fn in slots:
+                if cap <= 0:
+                    continue
+                avail, why = [], []
+                for t in teachers:
+                    if self._is_absent(t.id, d):
+                        why.append((t, "απουσία"))
+                    elif not avail_fn(t):
+                        why.append((t, f"δεν είναι διαθέσιμος/η {DAYS_GR[wd]}" + ("" if mode == "daily" else " σε αυτή τη ζώνη")))
+                    else:
+                        avail.append(t)
+                short, empty = len(avail) < cap, filled < cap
+                if not (short or empty):
+                    continue
+                g = groups.setdefault((wd, label), {"dates": [], "cap": cap, "avail": len(avail), "why": why, "avail_names": [t.name for t in avail], "short": short})
+                g["dates"].append(d)
+                if len(avail) < g["avail"]:
+                    g.update(avail=len(avail), why=why, avail_names=[t.name for t in avail], short=short)
+        lines: List[str] = []
+        for (wd, label), g in sorted(groups.items()):
+            ds = g["dates"]
+            ex = ", ".join(fmt_date(x) for x in ds[:3]) + ("…" if len(ds) > 3 else "")
+            head = f"• {DAYS_GR[wd]} · {label}: χρειάζονται {g['cap']} θέσεις, διαθέσιμοι/ες {g['avail']}"
+            if g["avail_names"]:
+                head += " (" + ", ".join(g["avail_names"][:6]) + ")"
+            lines.append(f"{head} — {len(ds)} ημερομηνίες (π.χ. {ex}).")
+            if g["why"]:
+                lines.append("    Μη διαθέσιμοι/ες: " + "; ".join(f"{t.name} ({r})" for t, r in g["why"][:8]) + ("…" if len(g["why"]) > 8 else ""))
+            if g["short"]:
+                fixable = [t.name for t, r in g["why"] if r.startswith("δεν είναι")]
+                need = g["cap"] - g["avail"]
+                tip = f"    Λύση: χρειάζονται τουλάχιστον {need} ακόμη διαθέσιμοι/ες εκπαιδευτικοί αυτή την ημέρα"
+                if fixable:
+                    tip += " — π.χ. άνοιξε τη διαθεσιμότητα σε: " + ", ".join(fixable[:4])
+                lines.append(tip + ", ή μείωσε τους τομείς της ημέρας.")
+            else:
+                lines.append("    Υπάρχουν αρκετοί διαθέσιμοι, αλλά οι θέσεις έμειναν κενές λόγω περιορισμών (κλειδωμένες εφημερίες, μία εφημερία ανά ημέρα ή ισοκατανομή). Δοκίμασε ξανά την παραγωγή.")
+        return lines
+
+    def _diagnosis_range(self):
+        try:
+            s_end = parse_date(self.db.get_setting("end_date"))
+            s_start = parse_date(self.db.get_setting("start_date"))
+            scope = self.regenerate_scope_var.get()
+            if scope == "all":
+                return s_start, s_end
+            a = parse_date(self.regenerate_from_var.get())
+            return a, (s_end if scope == "continue" else parse_date(self.regenerate_to_var.get()))
+        except Exception:
+            return date.today(), date.today()
+
+    def show_conflict_diagnosis(self):
+        a, b = self._diagnosis_range()
+        mode = self.mode_var.get()
+        if mode not in ("daily", "breaks"):
+            messagebox.showinfo("Διάγνωση συγκρούσεων", "Η αναλυτική διάγνωση υποστηρίζεται για τους τρόπους «Ανά ημέρα» και «Ανά διάλειμμα».")
+            return
+        lines = self.diagnose_conflicts(a, b, mode)
+        win = tk.Toplevel(self)
+        win.title("Διάγνωση συγκρούσεων")
+        win.geometry("820x480")
+        txt = tk.Text(win, wrap="word", font=("Segoe UI", 10), padx=10, pady=10)
+        txt.pack(fill="both", expand=True)
+        txt.insert("end", f"Έλεγχος διαστήματος {fmt_date(a)} – {fmt_date(b)}\n\n")
+        txt.insert("end", "\n".join(lines) if lines else "Δεν βρέθηκαν συγκρούσεις: όλες οι θέσεις είναι καλυμμένες και υπάρχουν αρκετοί διαθέσιμοι/ες.")
+        txt.config(state="disabled")
 
     def lock_completed_until(self):
         """Κλειδώνει αναθέσεις έως και μια ημερομηνία, ώστε να θεωρούνται πραγματοποιημένες."""
