@@ -170,6 +170,16 @@ class WebUI:
                     return self._json(e.status, {"error": str(e)})
                 except Exception as e:  # noqa: BLE001
                     return self._json(500, {"error": f"Σφάλμα: {e}"})
+                if isinstance(res, tuple) and res and res[0] == "file":
+                    from urllib.parse import quote
+                    self.send_response(200)
+                    self.send_header("Content-Type", res[3])
+                    self.send_header("Content-Length", str(len(res[2])))
+                    self.send_header("Content-Disposition", "attachment; filename*=UTF-8''" + quote(res[1]))
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    self.wfile.write(res[2])
+                    return
                 if isinstance(res, tuple) and res and res[0] == "html":
                     return self._send(200, res[1].encode("utf-8"), "text/html; charset=utf-8")
                 return self._json(200, res)
@@ -561,35 +571,144 @@ class WebUI:
         return {"lines": self.app.diagnose_conflicts(a, z, mode), "supported": True}
 
     # -------------------------------------------------------------- εκτύπωση
+    def _duty_rows(self, a: date, z: date, tid: Optional[int] = None):
+        sql = self.app.SCHEDULE_SQL + " WHERE a.d BETWEEN ? AND ?" + (" AND a.teacher_id=?" if tid else "") + " ORDER BY a.d, a.start_time, display_area"
+        args = (a.isoformat(), z.isoformat()) + ((tid,) if tid else ())
+        return self.db.conn.execute(sql, args).fetchall()
+
+    def _who_ids(self, who: str) -> List[int]:
+        if who.startswith("teacher:"):
+            return [int(who.split(":", 1)[1])]
+        if who == "each":
+            return [t.id for t in self.db.teachers() if t.active]
+        return []
+
     def api_print(self, p, b):
         a, z = self._d(p.get("from", "")), self._d(p.get("to", ""))
-        sql = self.app.SCHEDULE_SQL + " WHERE a.d BETWEEN ? AND ? ORDER BY a.d, a.start_time, display_area"
-        rows = self.db.conn.execute(sql, (a.isoformat(), z.isoformat())).fetchall()
-        tot: Dict[str, int] = {}
-        for r in rows:
-            if int(r["locked"] or 0):
-                tot[r["teacher"]] = tot.get(r["teacher"], 0) + 1
+        who = p.get("who", "all")
         esc = lambda s: str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        school = esc(self.db.get_setting("school_name", "").strip() or "Σχολείο")
         fmt = lambda s: f"{s[8:10]}/{s[5:7]}/{s[0:4]}"
-        out = [f"<!doctype html><meta charset='utf-8'><title>Εφημερίες {fmt(a.isoformat())}–{fmt(z.isoformat())}</title>",
-               "<style>body{font:13px 'Segoe UI',Arial,sans-serif;margin:24px;color:#111}h1{font-size:18px;margin:0}p{margin:2px 0 14px;color:#444}"
+        school = esc(self.db.get_setting("school_name", "").strip() or "Σχολείο")
+        period = f"{fmt(a.isoformat())} – {fmt(z.isoformat())}"
+        names = {t.id: t.name for t in self.db.teachers()}
+        out = [f"<!doctype html><meta charset='utf-8'><title>Εφημερίες {period}</title>",
+               "<style>body{font:13px 'Segoe UI',Arial,sans-serif;margin:24px;color:#111}h1{font-size:18px;margin:0}h2{font-size:15px;margin:2px 0}p{margin:2px 0 14px;color:#444}"
                "table{border-collapse:collapse;width:100%}th,td{border:1px solid #999;padding:5px 8px;text-align:left}th{background:#eee}"
-               "tr.day td{background:#f5f5f5;font-weight:600}@media print{.np{display:none}body{margin:8mm}}</style>",
-               f"<button class='np' onclick='print()' style='float:right;padding:6px 14px'>Εκτύπωση</button><h1>{school}</h1>",
-               f"<p>Εφημερίες {fmt(a.isoformat())} – {fmt(z.isoformat())}</p><table><tr><th>Ημερομηνία</th><th>Ημέρα</th><th>Ζώνη</th><th>Τομέας</th><th>Εκπαιδευτικός</th></tr>"]
-        last = None
-        for r in rows:
-            out.append(f"<tr><td>{fmt(r['d']) if r['d'] != last else ''}</td><td>{esc(r['weekday']) if r['d'] != last else ''}</td>"
-                       f"<td>{esc(r['interval_name'])} {esc(r['start_time'])}–{esc(r['end_time'])}</td><td>{esc(r['display_area'])}</td><td>{esc(r['teacher'])}</td></tr>")
-            last = r["d"]
-        out.append("</table>")
-        if tot:
-            out.append("<h3>Πραγματοποιηθείσες εφημερίες (σύνολο ανά εκπαιδευτικό)</h3><table><tr><th>Εκπαιδευτικός</th><th>Σύνολο</th></tr>")
-            for k in sorted(tot):
-                out.append(f"<tr><td>{esc(k)}</td><td>{tot[k]}</td></tr>")
-            out.append("</table>")
+               ".sheet{page-break-after:always;margin-bottom:30px}.sheet:last-of-type{page-break-after:auto}.tot{margin-top:10px;font-weight:600}"
+               "@media print{.np{display:none}body{margin:8mm}.sheet{margin-bottom:0}}</style>",
+               "<button class='np' onclick='print()' style='float:right;padding:6px 14px'>Εκτύπωση</button>"]
+
+        def table(rows, show_teacher: bool) -> str:
+            h = "<table><tr><th>Ημερομηνία</th><th>Ημέρα</th><th>Ζώνη</th><th>Τομέας</th>" + ("<th>Εκπαιδευτικός</th>" if show_teacher else "") + "<th></th></tr>"
+            last = None
+            for r in rows:
+                h += (f"<tr><td>{fmt(r['d']) if r['d'] != last else ''}</td><td>{esc(r['weekday']) if r['d'] != last else ''}</td>"
+                      f"<td>{esc(r['interval_name'])} {esc(r['start_time'])}–{esc(r['end_time'])}</td><td>{esc(r['display_area'])}</td>"
+                      + (f"<td>{esc(r['teacher'])}</td>" if show_teacher else "") + f"<td>{'✔' if int(r['locked'] or 0) else ''}</td></tr>")
+                last = r["d"]
+            return h + "</table>"
+        if who == "all":
+            rows = self._duty_rows(a, z)
+            out.append(f"<h1>{school}</h1><p>Εφημερίες {period}</p>" + table(rows, True))
+            tot: Dict[str, int] = {}
+            for r in rows:
+                if int(r["locked"] or 0):
+                    tot[r["teacher"]] = tot.get(r["teacher"], 0) + 1
+            if tot:
+                out.append("<h3>Πραγματοποιηθείσες εφημερίες (σύνολο ανά εκπαιδευτικό)</h3><table><tr><th>Εκπαιδευτικός</th><th>Σύνολο</th></tr>"
+                           + "".join(f"<tr><td>{esc(k)}</td><td>{tot[k]}</td></tr>" for k in sorted(tot)) + "</table>")
+        else:
+            ids = self._who_ids(who)
+            sheets = 0
+            for tid in ids:
+                rows = self._duty_rows(a, z, tid)
+                if not rows and who == "each":
+                    continue
+                done = sum(1 for r in rows if int(r["locked"] or 0))
+                days = len({r["d"] for r in rows})
+                out.append(f"<div class='sheet'><h1>{school}</h1><h2>{esc(names.get(tid, ''))}</h2><p>Πρόγραμμα εφημεριών {period}</p>"
+                           + (table(rows, False) if rows else "<p>Δεν υπάρχουν εφημερίες στο διάστημα.</p>")
+                           + f"<div class='tot'>Σύνολο: {len(rows)} εφημερίες σε {days} ημέρες · πραγματοποιημένες: {done}</div><p style='font-size:11px;margin-top:6px'>✔ = πραγματοποιημένη</p></div>")
+                sheets += 1
+            if not sheets:
+                out.append("<p>Δεν βρέθηκαν εφημερίες στο διάστημα.</p>")
         return ("html", "".join(out))
+
+    # ------------------------------------------------------------ ημερολόγιο (.ics)
+    _TZ = ("BEGIN:VTIMEZONE\r\nTZID:Europe/Athens\r\nBEGIN:DAYLIGHT\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0300\r\nTZNAME:EEST\r\nDTSTART:19700329T030000\r\n"
+           "RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU\r\nEND:DAYLIGHT\r\nBEGIN:STANDARD\r\nTZOFFSETFROM:+0300\r\nTZOFFSETTO:+0200\r\nTZNAME:EET\r\nDTSTART:19701025T040000\r\n"
+           "RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\n")
+
+    @staticmethod
+    def _ics_escape(t: str) -> str:
+        return str(t).replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
+
+    @staticmethod
+    def _ics_fold(line: str) -> str:
+        """Στίχοι ≤75 byte (UTF-8), συνέχεια με κενό στην αρχή."""
+        raw = line.encode("utf-8")
+        if len(raw) <= 75:
+            return line
+        parts, cur, size = [], "", 0
+        for ch in line:
+            n = len(ch.encode("utf-8"))
+            if size + n > (75 if not parts else 74):
+                parts.append(cur)
+                cur, size = "", 0
+            cur += ch
+            size += n
+        parts.append(cur)
+        return "\r\n ".join(parts)
+
+    def _ics(self, rows, cal_name: str, remind: int) -> bytes:
+        esc, now = self._ics_escape, datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+        lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Efimeries Ekpaideftikon//EL", "CALSCALE:GREGORIAN", "METHOD:PUBLISH",
+                 f"X-WR-CALNAME:{esc(cal_name)}", "X-WR-TIMEZONE:Europe/Athens"]
+        body = []
+        for r in rows:
+            d = r["d"].replace("-", "")
+            st, en = r["start_time"].replace(":", "") + "00", r["end_time"].replace(":", "") + "00"
+            zone = "" if r["mode"] == "daily" else f" · {r['interval_name']}"
+            summary = f"Εφημερία {r['display_area']}{zone}"
+            desc = f"{r['teacher']} · {r['interval_name']} {r['start_time']}–{r['end_time']} · {r['display_area']}"
+            ev = ["BEGIN:VEVENT", f"UID:efimeria-{r['id']}-{r['teacher_id']}@efimeries.local", f"DTSTAMP:{now}",
+                  f"DTSTART;TZID=Europe/Athens:{d}T{st}", f"DTEND;TZID=Europe/Athens:{d}T{en}",
+                  f"SUMMARY:{esc(summary)}", f"DESCRIPTION:{esc(desc)}", "TRANSP:OPAQUE"]
+            if remind > 0:
+                ev += ["BEGIN:VALARM", "ACTION:DISPLAY", f"DESCRIPTION:{esc(summary)}", f"TRIGGER:-PT{int(remind)}M", "END:VALARM"]
+            ev.append("END:VEVENT")
+            body += ev
+        head = "\r\n".join(self._ics_fold(x) for x in lines) + "\r\n" + self._TZ
+        return (head + "\r\n".join(self._ics_fold(x) for x in body) + ("\r\n" if body else "") + "END:VCALENDAR\r\n").encode("utf-8")
+
+    def api_ics(self, p, b):
+        import io
+        import zipfile
+        a, z = self._d(p.get("from", "")), self._d(p.get("to", ""))
+        who = p.get("who", "all")
+        remind = max(0, min(10080, int(p.get("remind") or 0)))
+        school = self.db.get_setting("school_name", "").strip() or "Σχολείο"
+        names = {t.id: t.name for t in self.db.teachers()}
+        safe = lambda s: "".join(ch if ch.isalnum() or ch in " -_" else "_" for ch in s).strip() or "efimeries"
+        period = f"{a.isoformat()}_{z.isoformat()}"
+        if who == "all":
+            rows = self._duty_rows(a, z)
+            return ("file", f"Efimeries_{period}.ics", self._ics(rows, f"Εφημερίες {school}", remind), "text/calendar; charset=utf-8")
+        if who.startswith("teacher:"):
+            tid = int(who.split(":", 1)[1])
+            rows = self._duty_rows(a, z, tid)
+            return ("file", f"Efimeries_{safe(names.get(tid, 'teacher'))}_{period}.ics", self._ics(rows, f"Εφημερίες {names.get(tid, '')}", remind), "text/calendar; charset=utf-8")
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            n = 0
+            for tid in self._who_ids("each"):
+                rows = self._duty_rows(a, z, tid)
+                if rows:
+                    zf.writestr(f"{safe(names.get(tid, str(tid)))}.ics", self._ics(rows, f"Εφημερίες {names.get(tid, '')}", remind))
+                    n += 1
+            if not n:
+                raise ApiError("Δεν υπάρχουν εφημερίες στο διάστημα")
+        return ("file", f"Efimeries_ana_ekpaideutiko_{period}.zip", buf.getvalue(), "application/zip")
 
     # ------------------------------------------------------------ ενημερώσεις
     def page_open(self) -> bool:

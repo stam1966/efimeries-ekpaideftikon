@@ -168,9 +168,10 @@ const ICON={
  people:'<circle cx="9" cy="8" r="3.4"/><path d="M2.5 20c.6-3.7 3.2-5.5 6.5-5.5s5.9 1.8 6.5 5.5"/><path d="M16 5.2a3.2 3.2 0 010 6M18 14.8c2 .6 3.2 2.3 3.5 5"/>',
  off:'<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>',
  gen:'<path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8"/>',
+ print:'<path d="M7 9V3h10v6M7 17H5a2 2 0 01-2-2v-4a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2h-2M7 14h10v7H7z"/>',
  more:'<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>',
  gear:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 01-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 010-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 014 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 010 4h-.1a1.7 1.7 0 00-1.5 1z"/>'};
-const PAGES=[["home","Αρχική","home"],["schedule","Πρόγραμμα","cal"],["teachers","Εκπαιδευτικοί","people"],["absences","Απουσίες","off"],["generate","Παραγωγή","gen"],["settings","Ρυθμίσεις","gear"]];
+const PAGES=[["home","Αρχική","home"],["schedule","Πρόγραμμα","cal"],["teachers","Εκπαιδευτικοί","people"],["absences","Απουσίες","off"],["generate","Παραγωγή","gen"],["reports","Εκτυπώσεις","print"],["settings","Ρυθμίσεις","gear"]];
 let S=null,cur="home";
 const nav=$("#nav");
 PAGES.forEach(([k,l,ic])=>nav.append(h("a",{id:"n-"+k,href:"#"+k,html:`<svg viewBox="0 0 24 24">${ICON[ic]}</svg>`},l)));
@@ -424,6 +425,47 @@ TAB.app=async v=>{
     h("div",{class:"row"},[["Σχολικό έτος, backup, ωρολόγιο","settings"],["Εκτυπώσεις και Excel","reports"],["Βάρδιες","shifts"]].map(([l,t])=>h("button",{class:"btn",onclick:()=>classic(t)},l)))));
 };
 
+/* ---------------- Εκτυπώσεις ---------------- */
+const RP={a:null,z:null,who:"all",remind:"0"};
+PAGE.reports=async v=>{
+  const [{teachers},g]=await Promise.all([api("/api/teachers"),api("/api/settings")]);
+  const tl=teachers.filter(t=>t.active);
+  if(!RP.a){[RP.a,RP.z]=monthRange(new Date())}
+  const a=h("input",{type:"date",value:RP.a,onchange:e=>RP.a=e.target.value}),z=h("input",{type:"date",value:RP.z,onchange:e=>RP.z=e.target.value});
+  const setR=(x,y)=>{RP.a=x;RP.z=y;a.value=x;z.value=y};
+  const now=new Date(),nm=new Date(now.getFullYear(),now.getMonth()+1,1);
+  const who=h("select",{id:"rp-who",onchange:e=>RP.who=e.target.value},
+    h("option",{value:"all"},"Όλοι οι εκπαιδευτικοί (ένας πίνακας)"),
+    h("option",{value:"each"},"Ο καθένας σε ξεχωριστό φύλλο (όλοι μεμιάς)"),
+    tl.map(t=>h("option",{value:"teacher:"+t.id},t.name)));
+  who.value=RP.who;
+  const icsWho=h("select",{id:"ics-who",onchange:e=>RP.icsWho=e.target.value},
+    h("option",{value:"all"},"Ένα αρχείο για όλους"),
+    h("option",{value:"each"},"Ένα αρχείο ανά εκπαιδευτικό (zip)"),
+    tl.map(t=>h("option",{value:"teacher:"+t.id},t.name)));
+  icsWho.value=RP.icsWho||"all";
+  const rem=h("select",{id:"ics-rem",onchange:e=>RP.remind=e.target.value},
+    [["0","Χωρίς υπενθύμιση"],["30","30 λεπτά πριν"],["60","1 ώρα πριν"],["1440","1 ημέρα πριν"]].map(([k,l])=>h("option",{value:k},l)));
+  rem.value=RP.remind;
+  v.append(h("h1",{},"Εκτυπώσεις και ημερολόγιο"),h("p",{class:"sub"},"Διάλεξε το διάστημα και τι θέλεις να βγάλεις. Ισχύει και για τις δύο ενότητες παρακάτω."),
+    h("div",{class:"card"},h("h2",{},"Διάστημα"),
+      h("div",{class:"row"},fld("Από",a),fld("Έως",z)),
+      h("div",{class:"row",style:"margin-top:10px;flex-wrap:wrap"},
+        h("button",{class:"btn sm",onclick:()=>setR(...monthRange(now))},"Τρέχων μήνας"),
+        h("button",{class:"btn sm",onclick:()=>setR(...monthRange(nm))},"Επόμενος μήνας"),
+        h("button",{class:"btn sm",onclick:()=>setR(g.start,g.end)},"Όλο το σχολικό έτος"))),
+    h("div",{class:"card"},h("h2",{},"Εκτύπωση"),
+      h("div",{class:"row"},fld("Για ποιους",who)),
+      h("p",{class:"m",style:"color:var(--muted)"},"«Ο καθένας σε ξεχωριστό φύλλο»: κάθε εκπαιδευτικός με εφημερίες στο διάστημα παίρνει δική του σελίδα, ώστε να εκτυπωθούν όλες μαζί και να μοιραστούν."),
+      h("div",{class:"row",style:"margin-top:12px"},h("button",{class:"btn pri",id:"rp-print",onclick:()=>{if(!RP.a||!RP.z||RP.a>RP.z)return toast("Έλεγξε το διάστημα");window.open("/api/print?"+q({from:RP.a,to:RP.z,who:RP.who,t:TOKEN}),"_blank")}},"Άνοιγμα για εκτύπωση"))),
+    h("div",{class:"card"},h("h2",{},"Ημερολόγιο για κινητά και Google Calendar (.ics)"),
+      h("div",{class:"grid g2"},fld("Τι να περιέχει",icsWho),fld("Υπενθύμιση",rem)),
+      h("div",{class:"row",style:"margin-top:12px"},h("button",{class:"btn pri",id:"ics-dl",onclick:()=>{if(!RP.a||!RP.z||RP.a>RP.z)return toast("Έλεγξε το διάστημα");location.href="/api/ics?"+q({from:RP.a,to:RP.z,who:icsWho.value,remind:RP.remind,t:TOKEN})}},"Λήψη αρχείου")),
+      h("details",{style:"margin-top:14px"},h("summary",{},"Πώς το βάζω στο ημερολόγιο;"),
+        h("ul",{class:"m"},
+          h("li",{},"Google Calendar (υπολογιστής): calendar.google.com → Ρυθμίσεις (γρανάζι) → Εισαγωγή και εξαγωγή → Εισαγωγή → διάλεξε το αρχείο .ics. Μετά εμφανίζεται αυτόματα και στο κινητό."),
+          h("li",{},"Android / iPhone: στείλε το αρχείο στον εκπαιδευτικό (email, Viber κ.λπ.) και πάτησέ το από το κινητό· ανοίγει στο ημερολόγιο και ζητά επιβεβαίωση."),
+          h("li",{},"Το αρχείο είναι στιγμιότυπο: αν αλλάξει το πρόγραμμα, κατέβασε και στείλε ξανά νέο αρχείο (οι εφημερίες ενημερώνονται αντί να διπλασιάζονται)."))))) };
 /* ---------------- Ρυθμίσεις ---------------- */
 let ST={tab:"school"};
 PAGE.settings=async v=>{
