@@ -178,7 +178,7 @@ async function route(){
   PAGES.forEach(p=>$("#n-"+p[0]).classList.toggle("on",p[0]===cur));
   closeDrawer();
   const v=$("#view");v.replaceChildren(h("div",{class:"empty"},"Φόρτωση…"));
-  try{S=await api("/api/state");$("#bSchool").textContent=S.school;$("#bYear").textContent="Σχολικό έτος "+S.year;$("#bVer").textContent="v"+S.version+" · "+S.arch;
+  try{S=await api("/api/state");if(S.theme!==THEME){THEME=S.theme||"auto";applyTheme()}$("#bSchool").textContent=S.school;$("#bYear").textContent="Σχολικό έτος "+S.year;$("#bVer").textContent="v"+S.version+" · "+S.arch;
     v.replaceChildren();await PAGE[cur](v)}catch(e){v.replaceChildren(h("div",{class:"alert bad"},"⚠ "+e.message))}
 }
 /* ---------------- Συρτάρι ---------------- */
@@ -396,14 +396,15 @@ PAGE.more=async v=>{
   const lbl=h("label",{class:"row",style:"cursor:pointer"});const cbx=h("input",{type:"checkbox",onchange:e=>guard(async()=>{await api("/api/setting",{key:"ui_mode",value:e.target.checked?"web":"classic"});toast(e.target.checked?"Την επόμενη φορά η εφαρμογή θα ανοίγει με τη νέα διεπαφή.":"Η εφαρμογή θα ανοίγει με την κλασική διεπαφή.")})});cbx.checked=S.web_start;
   lbl.append(cbx,"Εκκίνηση της εφαρμογής με τη νέα διεπαφή");
   v.append(h("div",{class:"card",style:"margin-top:16px"},h("h2",{},"Εμφάνιση και εκκίνηση"),lbl,
-    h("div",{class:"row",style:"margin-top:12px"},h("span",{class:"m",style:"color:var(--muted)"},"Θέμα:"),h("div",{class:"seg"},[["auto","Αυτόματο"],["light","Φωτεινό"],["dark","Σκούρο"]].map(([k,l])=>h("button",{class:themeNow()===k?"on":"",onclick:()=>{setTheme(k);route()}},l))))));
+    h("div",{class:"row",style:"margin-top:12px"},h("span",{class:"m",style:"color:var(--muted)"},"Θέμα:"),h("div",{class:"seg"},[["auto","Αυτόματο"],["light","Φωτεινό"],["dark","Σκούρο"]].map(([k,l])=>h("button",{class:themeNow()===k?"on":"",onclick:async()=>{await setTheme(k);route()}},l))))));
   v.append(h("div",{class:"card",style:"margin-top:16px"},h("h2",{},"Πληροφορίες"),h("p",{class:"m",style:"margin:0;color:var(--muted)"},`Έκδοση v${S.version} (${S.arch}) · Φάκελος δεδομένων: ${S.data_dir}`),
     h("div",{class:"row",style:"margin-top:12px"},h("button",{class:"btn danger",onclick:()=>{if(confirm("Να κλείσει η εφαρμογή;"))api("/api/quit",{}).then(()=>{document.body.innerHTML='<div style="padding:60px;text-align:center;font:16px system-ui">Η εφαρμογή έκλεισε. Μπορείτε να κλείσετε αυτό το παράθυρο.</div>'}).catch(()=>{})}},"Έξοδος από την εφαρμογή"))));
 };
-function themeNow(){try{return localStorage.getItem("theme")||"auto"}catch(e){return"auto"}}
-function setTheme(k){try{localStorage.setItem("theme",k)}catch(e){}applyTheme()}
-function applyTheme(){const k=themeNow();if(k==="auto")document.documentElement.removeAttribute("data-theme");else document.documentElement.setAttribute("data-theme",k)}
-applyTheme();
+/* Το θέμα αποθηκεύεται στη βάση της εφαρμογής (όχι στον browser), γιατί η θύρα αλλάζει σε κάθε εκκίνηση. */
+let THEME="auto";
+function themeNow(){return THEME}
+async function setTheme(k){THEME=k;applyTheme();try{await api("/api/setting",{key:"ui_theme",value:k})}catch(e){}}
+function applyTheme(){const k=THEME;if(k==="auto")document.documentElement.removeAttribute("data-theme");else document.documentElement.setAttribute("data-theme",k)}
 setInterval(()=>{fetch("/api/ping",{method:"POST",headers:{"X-Token":TOKEN}}).catch(()=>{})},4000);
 fetch("/api/ping",{method:"POST",headers:{"X-Token":TOKEN}}).catch(()=>{});
 addEventListener("pagehide",()=>{try{navigator.sendBeacon("/api/bye?t="+TOKEN)}catch(e){}});

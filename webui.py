@@ -326,6 +326,7 @@ class WebUI:
             "today": today.isoformat(), "upcoming": rows, "attention": attention,
             "data_dir": str(self.mod.STORAGE_ROOT),
             "web_start": db.get_setting("ui_mode", "classic") == "web",
+            "theme": db.get_setting("ui_theme", "auto"),
             "can_undo": bool(app.__dict__.get("_undo_stack")),
         }
 
@@ -586,7 +587,7 @@ class WebUI:
 
     def api_setting(self, p, b):
         key = b.get("key")
-        if key not in ("ui_mode",):
+        if key not in ("ui_mode", "ui_theme"):
             raise ApiError("Μη επιτρεπτή ρύθμιση")
         self.db.set_setting(key, str(b.get("value") or ""))
         return {"ok": True}
