@@ -428,7 +428,7 @@ TAB.app=async v=>{
 let ST={tab:"school"};
 PAGE.settings=async v=>{
   v.append(h("h1",{},"Ρυθμίσεις"),h("p",{class:"sub"},"Σχολείο, τομείς, χρονικές ζώνες, ειδικές ημέρες και εμφάνιση."));
-  const tabs=[["school","Σχολείο"],["areas","Τομείς"],["intervals","Χρονικές ζώνες"],["days","Ειδικές ημέρες"],["app","Εφαρμογή"]];
+  const tabs=[["school","Σχολείο"],["areas","Τομείς"],["intervals","Χρονικές ζώνες"],["days","Ειδικές ημέρες"],["storage","Αποθήκευση"],["app","Εφαρμογή"]];
   v.append(h("div",{class:"seg",style:"margin-bottom:16px;flex-wrap:wrap"},tabs.map(([k,l])=>h("button",{class:ST.tab===k?"on":"",onclick:()=>{ST.tab=k;route()}},l))));
   const box=h("div");v.append(box);await TAB[ST.tab](box)};
 const fld=(l,inp)=>h("label",{class:"f"},l,inp);
@@ -443,6 +443,34 @@ TAB.school=async v=>{
     h("div",{class:"row",style:"margin-top:16px"},saveBtn(async()=>{await api("/api/settings/save",{school_name:name.value,school_phone:phone.value,school_email:mail.value,start:a.value,end:z.value});toast("Αποθηκεύτηκε");route()})),
     h("p",{class:"m",style:"color:var(--muted)"},"Αλλαγή σχολικού έτους και backup: Εφαρμογή → «Για προχωρημένους».")))};
 function simpleTable(cols,rows,onrow,empty){return rows.length?h("table",{},h("thead",{},h("tr",{},cols.map(c=>h("th",{},c)))),h("tbody",{},rows.map(r=>h("tr",{class:"clk",onclick:()=>onrow(r.o)},r.cells.map(c=>h("td",{},c)))))):h("div",{class:"empty"},empty)}
+TAB.storage=async v=>{
+  const s=await api("/api/storage");
+  const inp=h("input",{type:"text",value:"",placeholder:String.raw`π.χ. \\server\koinos\Efimeries  ή  D:\Efimeries`,style:"flex:1;min-width:280px"});
+  let copy=true;
+  const copyBox=h("div",{class:"hide",style:"margin-top:12px"});
+  function drawCopy(){copyBox.replaceChildren(
+    h("div",{class:"opt"+(copy?" sel":""),onclick:()=>{copy=true;drawCopy()}},h("input",{type:"radio",checked:copy}),h("div",{},h("b",{},"Αντιγραφή των τρεχόντων δεδομένων στον νέο φάκελο"),h("span",{},"Επίλεξέ το όταν ρυθμίζεις τον κοινόχρηστο φάκελο για πρώτη φορά, από τον υπολογιστή που έχει ήδη τα δεδομένα."))),
+    h("div",{class:"opt"+(!copy?" sel":""),onclick:()=>{copy=false;drawCopy()}},h("input",{type:"radio",checked:!copy}),h("div",{},h("b",{},"Χρήση των δεδομένων που υπάρχουν ήδη στον φάκελο"),h("span",{},"Επίλεξέ το στον δεύτερο υπολογιστή, αφού ο κοινός φάκελος έχει ήδη τα δεδομένα."))))}
+  drawCopy();
+  const apply=h("button",{class:"btn pri",onclick:e=>guard(async()=>{
+    if(!inp.value.trim())throw new Error("Γράψε ή επίλεξε φάκελο");
+    if(!confirm("Η εφαρμογή θα χρησιμοποιεί από τώρα τον φάκελο:\n"+inp.value+"\n"+(copy?"Τα τρέχοντα δεδομένα θα αντιγραφούν εκεί.":"Θα χρησιμοποιηθούν τα δεδομένα που υπάρχουν ήδη εκεί.")+"\n\nΝα συνεχίσω;"))return;
+    const r=await api("/api/storage/set",{path:inp.value,copy});toast(r.changed?"Ο φάκελος δεδομένων άλλαξε.":"Δεν έγινε αλλαγή.");
+    if(r.messages&&r.messages.length)alert(r.messages.join("\n\n"));route()},e.currentTarget)},"Εφαρμογή φακέλου");
+  const browse=h("button",{class:"btn",onclick:e=>guard(async()=>{const r=await api("/api/storage/browse",{});if(r.path){inp.value=r.path.replace(/\//g,"\\");copyBox.classList.remove("hide")}},e.currentTarget)},"Αναζήτηση…");
+  inp.oninput=()=>copyBox.classList.toggle("hide",!inp.value.trim());
+  v.append(h("div",{class:"card"},h("h2",{},"Πού αποθηκεύονται τα δεδομένα"),
+    h("p",{style:"margin:0 0 4px"},h("b",{},s.root)),
+    h("p",{class:"m",style:"color:var(--muted);margin:0"},(s.local?"Τοπικός φάκελος της εφαρμογής":"Φάκελος εκτός της εφαρμογής (π.χ. κοινόχρηστος)")+" · "+s.teachers+" εκπαιδευτικοί · "+s.assignments+" εφημερίες"),
+    s.db?h("p",{class:"m",style:"color:var(--muted);margin:2px 0 0;word-break:break-all"},"Βάση: "+s.db):null),
+    );
+  v.append(h("div",{class:"card",style:"margin-top:16px"},h("h2",{},"Χρήση από δύο υπολογιστές (κοινόχρηστος φάκελος)"),
+    h("p",{class:"m",style:"color:var(--muted);margin-top:-4px"},"Αν η εφαρμογή τρέχει σε δύο υπολογιστές του ίδιου δικτύου, και οι δύο πρέπει να δείχνουν στον ΙΔΙΟ φάκελο δικτύου. Δεν πρέπει να είναι ανοιχτοί ταυτόχρονα: ο δεύτερος θα ειδοποιηθεί ότι ο φάκελος χρησιμοποιείται."),
+    h("div",{class:"row"},inp,browse),copyBox,h("div",{class:"row",style:"margin-top:14px"},apply)));
+  v.append(h("div",{class:"card",style:"margin-top:16px"},h("h2",{},"Οδηγίες"),h("ol",{style:"margin:0;padding-left:20px;color:var(--muted)"},
+    h("li",{},"Στον πρώτο υπολογιστή: διάλεξε τον κοινόχρηστο φάκελο και «Αντιγραφή των τρεχόντων δεδομένων»."),
+    h("li",{},"Στον δεύτερο υπολογιστή: διάλεξε τον ΙΔΙΟ φάκελο και «Χρήση των δεδομένων που υπάρχουν ήδη»."),
+    h("li",{},"Από εκεί και πέρα εργάζεστε εναλλάξ· δεν χρειάζεται καμία άλλη ρύθμιση."))))};
 TAB.areas=async v=>{
   const {areas}=await api("/api/areas");
   v.append(h("div",{class:"row",style:"margin-bottom:12px"},h("p",{class:"m",style:"color:var(--muted);margin:0"},"Οι τομείς είναι τα σημεία όπου γίνεται εφημερία (π.χ. Ανατολικά, Δυτικά). Η σειρά τους καθορίζει ποιοι χρησιμοποιούνται όταν χρειάζονται λιγότεροι."),h("div",{class:"sp"}),h("button",{class:"btn pri",onclick:()=>editArea(null)},"+ Νέος τομέας")));

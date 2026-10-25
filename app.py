@@ -38,7 +38,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 
 APP_TITLE = "Εφημερίες Εκπαιδευτικών"
-APP_VERSION = "0.62"
+APP_VERSION = "0.63"
 UPDATE_REPO = "stam1966/efimeries-ekpaideftikon"  # αποθετήριο GitHub από όπου ελέγχονται οι νέες εκδόσεις
 
 # Όρια εργασίας του εβδομαδιαίου σχεδιασμού (προστατεύουν από πολύ αργούς υπολογισμούς σε μεγάλα σχολεία).
@@ -1306,9 +1306,10 @@ class EfimeriesApp(tk.Tk):
         self._release_storage_lock()
         self.destroy()
 
-    def change_storage_root(self) -> None:
+    def change_storage_root(self, selected: Optional[str] = None, copy_data: Optional[bool] = None) -> None:
         global STORAGE_ROOT
-        selected = filedialog.askdirectory(title="Επιλογή φακέλου κοινόχρηστων δεδομένων", initialdir=str(STORAGE_ROOT))
+        if not selected:
+            selected = filedialog.askdirectory(title="Επιλογή φακέλου κοινόχρηστων δεδομένων", initialdir=str(STORAGE_ROOT))
         if not selected:
             return
         new_root = Path(selected).resolve()
@@ -1321,12 +1322,13 @@ class EfimeriesApp(tk.Tk):
             messagebox.showinfo("Φάκελος δεδομένων", "Ο επιλεγμένος φάκελος χρησιμοποιείται ήδη.")
             return
         old_root = STORAGE_ROOT
-        copy_data = messagebox.askyesno(
-            "Μεταφορά δεδομένων",
-            "Θέλεις να αντιγραφούν τα τρέχοντα data, backups και exports στον νέο φάκελο;\n\n"
-            "Επίλεξε Ναι όταν ρυθμίζεις για πρώτη φορά τον κοινόχρηστο φάκελο. "
-            "Επίλεξε Όχι αν ο κοινόχρηστος φάκελος έχει ήδη τα δεδομένα που θέλεις να χρησιμοποιήσεις."
-        )
+        if copy_data is None:
+            copy_data = messagebox.askyesno(
+                "Μεταφορά δεδομένων",
+                "Θέλεις να αντιγραφούν τα τρέχοντα data, backups και exports στον νέο φάκελο;\n\n"
+                "Επίλεξε Ναι όταν ρυθμίζεις για πρώτη φορά τον κοινόχρηστο φάκελο. "
+                "Επίλεξε Όχι αν ο κοινόχρηστος φάκελος έχει ήδη τα δεδομένα που θέλεις να χρησιμοποιήσεις."
+            )
         try:
             # Κλείνουμε την τρέχουσα βάση πριν αλλάξουμε τοποθεσία.
             try: self.db.close()

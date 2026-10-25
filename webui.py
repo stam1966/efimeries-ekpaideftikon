@@ -837,6 +837,34 @@ class WebUI:
         self.app.refresh_all()
         return {"ok": True}
 
+    # ------------------------------------------------- φάκελος δεδομένων (v0.63)
+    def api_storage(self, p, b):
+        m = self.mod
+        root = Path(m.STORAGE_ROOT)
+        try:
+            dbp = str(m.year_db_path(self.app.active_school_year))
+        except Exception:
+            dbp = ""
+        installed = (m.app_dir() / "installed.flag").exists()
+        c = self.db.conn
+        return {"root": str(root), "db": dbp, "installed": installed, "local": root == m.app_dir(),
+                "teachers": c.execute("SELECT COUNT(*) FROM teachers").fetchone()[0], "assignments": c.execute("SELECT COUNT(*) FROM assignments").fetchone()[0]}
+
+    def api_storage_browse(self, p, b):
+        from tkinter import filedialog
+        sel = filedialog.askdirectory(title="Επιλογή φακέλου κοινόχρηστων δεδομένων", initialdir=str(self.mod.STORAGE_ROOT))
+        return {"path": sel or ""}
+
+    def api_storage_set(self, p, b):
+        path = str(b.get("path") or "").strip().strip('"')
+        if not path:
+            raise ApiError("Γράψε ή επίλεξε φάκελο")
+        before = str(self.mod.STORAGE_ROOT)
+        with _Captured() as cap:
+            self.app.change_storage_root(selected=path, copy_data=bool(b.get("copy")))
+        self.app.refresh_all()
+        return {"ok": True, "root": str(self.mod.STORAGE_ROOT), "changed": str(self.mod.STORAGE_ROOT) != before, "messages": cap.messages}
+
     # ---------------------------------------------------------------- λοιπά
     def api_classic(self, p, b):
         self.show_classic(str(b.get("tab") or ""))
