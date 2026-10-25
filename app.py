@@ -38,7 +38,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 
 APP_TITLE = "Εφημερίες Εκπαιδευτικών"
-APP_VERSION = "0.65"
+APP_VERSION = "0.66"
 UPDATE_REPO = "stam1966/efimeries-ekpaideftikon"  # αποθετήριο GitHub από όπου ελέγχονται οι νέες εκδόσεις
 
 # Όρια εργασίας του εβδομαδιαίου σχεδιασμού (προστατεύουν από πολύ αργούς υπολογισμούς σε μεγάλα σχολεία).
@@ -4229,6 +4229,111 @@ class EfimeriesApp(tk.Tk):
         if show_message:
             messagebox.showinfo("Σχολικό έτος", f"Άνοιξε το σχολικό έτος {sy}.")
 
+    def create_school_year(self, sy_text: str, start_text: str, end_text: str, opts: dict) -> str:
+        """Δημιουργεί νέο σχολικό έτος (χωρίς πρόγραμμα) με προαιρετική αντιγραφή ρυθμίσεων από το τρέχον. Επιστρέφει το έτος."""
+        newdb = None
+        try:
+            sy = normalize_school_year(sy_text)
+            start = parse_date(start_text).isoformat()
+            end = parse_date(end_text).isoformat()
+            if parse_date(start) > parse_date(end):
+                raise ValueError("Η έναρξη δεν μπορεί να είναι μετά τη λήξη.")
+            target = year_db_path(sy)
+            if target.exists():
+                raise ValueError(f"Το σχολικό έτος {sy} υπάρχει ήδη.")
+
+            source = self.db
+            newdb = DB(target, sy)
+            newdb.set_setting("start_date", start)
+            newdb.set_setting("end_date", end)
+            if opts["mode"]:
+                newdb.set_setting("mode", source.get_setting("mode", "daily"))
+            if opts["school"]:
+                for key in ("school_name", "school_phone", "school_email", "print_size"):
+                    newdb.set_setting(key, source.get_setting(key, "" if key != "print_size" else "normal"))
+
+            if opts["areas"]:
+                newdb.conn.execute("DELETE FROM areas")
+                rows = source.conn.execute("SELECT name,description,active,sort_order FROM areas ORDER BY id").fetchall()
+                newdb.conn.executemany("INSERT INTO areas(name,description,active,sort_order) VALUES(?,?,?,?)", [tuple(r) for r in rows])
+
+            if opts["intervals"]:
+                newdb.conn.execute("DELETE FROM duty_intervals")
+                rows = source.conn.execute("SELECT name,start_time,end_time,active,sort_order FROM duty_intervals ORDER BY id").fetchall()
+                newdb.conn.executemany("INSERT INTO duty_intervals(name,start_time,end_time,active,sort_order) VALUES(?,?,?,?,?)", [tuple(r) for r in rows])
+
+            if opts["shifts"] and opts["intervals"] and opts["areas"]:
+                newdb.conn.execute("DELETE FROM shift_interval_map")
+                newdb.conn.execute("DELETE FROM shift_area_map")
+                newdb.conn.execute("DELETE FROM shifts")
+                source_shifts=source.conn.execute("SELECT * FROM shifts ORDER BY id").fetchall()
+                old_to_new_shift={}
+                old_area_name={int(r["id"]):r["name"] for r in source.conn.execute("SELECT id,name FROM areas").fetchall()}
+                new_area_by_name={r["name"]:int(r["id"]) for r in newdb.conn.execute("SELECT id,name FROM areas").fetchall()}
+                old_interval_name={int(r["id"]):r["name"] for r in source.conn.execute("SELECT id,name FROM duty_intervals").fetchall()}
+                new_interval_by_name={r["name"]:int(r["id"]) for r in newdb.conn.execute("SELECT id,name FROM duty_intervals").fetchall()}
+                for sh in source_shifts:
+                    cur=newdb.conn.execute("INSERT INTO shifts(name,active,sort_order,has_reserve) VALUES(?,?,?,?)",(sh["name"],sh["active"],sh["sort_order"],sh["has_reserve"]))
+                    old_to_new_shift[int(sh["id"])]=int(cur.lastrowid)
+                for r in source.conn.execute("SELECT shift_id,weekday,interval_id FROM shift_interval_map").fetchall():
+                    ns=old_to_new_shift.get(int(r["shift_id"])); ni=new_interval_by_name.get(old_interval_name.get(int(r["interval_id"]),""))
+                    if ns and ni:newdb.conn.execute("INSERT OR IGNORE INTO shift_interval_map(shift_id,weekday,interval_id) VALUES(?,?,?)",(ns,r["weekday"],ni))
+                for r in source.conn.execute("SELECT shift_id,area_id FROM shift_area_map").fetchall():
+                    ns=old_to_new_shift.get(int(r["shift_id"])); na=new_area_by_name.get(old_area_name.get(int(r["area_id"]),""))
+                    if ns and na:newdb.conn.execute("INSERT OR IGNORE INTO shift_area_map(shift_id,area_id) VALUES(?,?)",(ns,na))
+
+            teacher_map = {}
+            if opts["teachers"]:
+                newdb.conn.execute("DELETE FROM teachers")
+                rows = source.conn.execute("SELECT * FROM teachers ORDER BY id").fetchall()
+                for r in rows:
+                    if opts["availability"]:
+                        mon,tue,wed,thu,fri = r["mon"],r["tue"],r["wed"],r["thu"],r["fri"]
+                        primary, alternate = r["primary_day"], r["alternate_day"]
+                    else:
+                        mon=tue=wed=thu=fri=1
+                        primary=alternate=-1
+                    cur = newdb.conn.execute(
+                        "INSERT INTO teachers(name,participates,active,mon,tue,wed,thu,fri,primary_day,alternate_day,extra_cycle,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (r["name"], r["participates"], r["active"], mon,tue,wed,thu,fri, primary,alternate, r["extra_cycle"], r["notes"])
+                    )
+                    teacher_map[int(r["id"])] = int(cur.lastrowid)
+                    if opts["availability"]:
+                        alts=source.teacher_alternate_days(int(r["id"]), int(r["alternate_day"]))
+                        newdb.set_teacher_alternate_days(int(cur.lastrowid), alts)
+
+            if opts["teachers"] and opts["availability"]:
+                interval_name_by_id = {int(r["id"]): r["name"] for r in source.conn.execute("SELECT id,name FROM duty_intervals").fetchall()}
+                new_interval_by_name = {r["name"]: int(r["id"]) for r in newdb.conn.execute("SELECT id,name FROM duty_intervals").fetchall()}
+                av_rows = source.conn.execute("SELECT teacher_id,weekday,interval_id,available FROM teacher_interval_availability").fetchall()
+                for r in av_rows:
+                    nt = teacher_map.get(int(r["teacher_id"]))
+                    name = interval_name_by_id.get(int(r["interval_id"]))
+                    ni = new_interval_by_name.get(name) if name else None
+                    if nt and ni:
+                        newdb.conn.execute("INSERT OR REPLACE INTO teacher_interval_availability(teacher_id,weekday,interval_id,available) VALUES(?,?,?,?)", (nt, r["weekday"], ni, r["available"]))
+                if opts["shifts"]:
+                    source_shift_name={int(r["id"]):r["name"] for r in source.conn.execute("SELECT id,name FROM shifts").fetchall()}
+                    new_shift_by_name={r["name"]:int(r["id"]) for r in newdb.conn.execute("SELECT id,name FROM shifts").fetchall()}
+                    for r in source.conn.execute("SELECT teacher_id,weekday,shift_id,available FROM teacher_shift_availability").fetchall():
+                        nt=teacher_map.get(int(r["teacher_id"])); ns=new_shift_by_name.get(source_shift_name.get(int(r["shift_id"]),""))
+                        if nt and ns:newdb.conn.execute("INSERT OR REPLACE INTO teacher_shift_availability(teacher_id,weekday,shift_id,available) VALUES(?,?,?,?)",(nt,r["weekday"],ns,r["available"]))
+                    # Περιορισμοί τομέων βαρδιών ανά εκπαιδευτικό, με αντιστοίχιση ονομασίας τομέα.
+                    for r in source.conn.execute("SELECT teacher_id,area_id FROM teacher_shift_area_permissions").fetchall():
+                        nt=teacher_map.get(int(r["teacher_id"])); na=new_area_by_name.get(old_area_name.get(int(r["area_id"]),""))
+                        if nt and na:newdb.conn.execute("INSERT OR IGNORE INTO teacher_shift_area_permissions(teacher_id,area_id) VALUES(?,?)",(nt,na))
+
+            newdb.conn.commit()
+            newdb.close()
+            return sy
+        except Exception:
+            try:
+                if newdb is not None:
+                    newdb.close()
+            except Exception:
+                pass
+            raise
+
     def new_school_year_dialog(self) -> None:
         win = tk.Toplevel(self)
         win.title("Νέο σχολικό έτος")
@@ -4290,107 +4395,13 @@ class EfimeriesApp(tk.Tk):
 
         def create():
             try:
-                sy = normalize_school_year(year_cb.get())
-                start = parse_date(start_e.get()).isoformat()
-                end = parse_date(end_e.get()).isoformat()
-                if parse_date(start) > parse_date(end):
-                    raise ValueError("Η έναρξη δεν μπορεί να είναι μετά τη λήξη.")
-                target = year_db_path(sy)
-                if target.exists():
-                    raise ValueError(f"Το σχολικό έτος {sy} υπάρχει ήδη.")
-
-                source = self.db
-                newdb = DB(target, sy)
-                newdb.set_setting("start_date", start)
-                newdb.set_setting("end_date", end)
-                if copy_mode.get():
-                    newdb.set_setting("mode", source.get_setting("mode", "daily"))
-                if copy_school.get():
-                    for key in ("school_name", "school_phone", "school_email", "print_size"):
-                        newdb.set_setting(key, source.get_setting(key, "" if key != "print_size" else "normal"))
-
-                if copy_areas.get():
-                    newdb.conn.execute("DELETE FROM areas")
-                    rows = source.conn.execute("SELECT name,description,active,sort_order FROM areas ORDER BY id").fetchall()
-                    newdb.conn.executemany("INSERT INTO areas(name,description,active,sort_order) VALUES(?,?,?,?)", [tuple(r) for r in rows])
-
-                if copy_intervals.get():
-                    newdb.conn.execute("DELETE FROM duty_intervals")
-                    rows = source.conn.execute("SELECT name,start_time,end_time,active,sort_order FROM duty_intervals ORDER BY id").fetchall()
-                    newdb.conn.executemany("INSERT INTO duty_intervals(name,start_time,end_time,active,sort_order) VALUES(?,?,?,?,?)", [tuple(r) for r in rows])
-
-                if copy_shifts.get() and copy_intervals.get() and copy_areas.get():
-                    newdb.conn.execute("DELETE FROM shift_interval_map")
-                    newdb.conn.execute("DELETE FROM shift_area_map")
-                    newdb.conn.execute("DELETE FROM shifts")
-                    source_shifts=source.conn.execute("SELECT * FROM shifts ORDER BY id").fetchall()
-                    old_to_new_shift={}
-                    old_area_name={int(r["id"]):r["name"] for r in source.conn.execute("SELECT id,name FROM areas").fetchall()}
-                    new_area_by_name={r["name"]:int(r["id"]) for r in newdb.conn.execute("SELECT id,name FROM areas").fetchall()}
-                    old_interval_name={int(r["id"]):r["name"] for r in source.conn.execute("SELECT id,name FROM duty_intervals").fetchall()}
-                    new_interval_by_name={r["name"]:int(r["id"]) for r in newdb.conn.execute("SELECT id,name FROM duty_intervals").fetchall()}
-                    for sh in source_shifts:
-                        cur=newdb.conn.execute("INSERT INTO shifts(name,active,sort_order,has_reserve) VALUES(?,?,?,?)",(sh["name"],sh["active"],sh["sort_order"],sh["has_reserve"]))
-                        old_to_new_shift[int(sh["id"])]=int(cur.lastrowid)
-                    for r in source.conn.execute("SELECT shift_id,weekday,interval_id FROM shift_interval_map").fetchall():
-                        ns=old_to_new_shift.get(int(r["shift_id"])); ni=new_interval_by_name.get(old_interval_name.get(int(r["interval_id"]),""))
-                        if ns and ni:newdb.conn.execute("INSERT OR IGNORE INTO shift_interval_map(shift_id,weekday,interval_id) VALUES(?,?,?)",(ns,r["weekday"],ni))
-                    for r in source.conn.execute("SELECT shift_id,area_id FROM shift_area_map").fetchall():
-                        ns=old_to_new_shift.get(int(r["shift_id"])); na=new_area_by_name.get(old_area_name.get(int(r["area_id"]),""))
-                        if ns and na:newdb.conn.execute("INSERT OR IGNORE INTO shift_area_map(shift_id,area_id) VALUES(?,?)",(ns,na))
-
-                teacher_map = {}
-                if copy_teachers.get():
-                    newdb.conn.execute("DELETE FROM teachers")
-                    rows = source.conn.execute("SELECT * FROM teachers ORDER BY id").fetchall()
-                    for r in rows:
-                        if copy_availability.get():
-                            mon,tue,wed,thu,fri = r["mon"],r["tue"],r["wed"],r["thu"],r["fri"]
-                            primary, alternate = r["primary_day"], r["alternate_day"]
-                        else:
-                            mon=tue=wed=thu=fri=1
-                            primary=alternate=-1
-                        cur = newdb.conn.execute(
-                            "INSERT INTO teachers(name,participates,active,mon,tue,wed,thu,fri,primary_day,alternate_day,extra_cycle,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                            (r["name"], r["participates"], r["active"], mon,tue,wed,thu,fri, primary,alternate, r["extra_cycle"], r["notes"])
-                        )
-                        teacher_map[int(r["id"])] = int(cur.lastrowid)
-                        if copy_availability.get():
-                            alts=source.teacher_alternate_days(int(r["id"]), int(r["alternate_day"]))
-                            newdb.set_teacher_alternate_days(int(cur.lastrowid), alts)
-
-                if copy_teachers.get() and copy_availability.get():
-                    interval_name_by_id = {int(r["id"]): r["name"] for r in source.conn.execute("SELECT id,name FROM duty_intervals").fetchall()}
-                    new_interval_by_name = {r["name"]: int(r["id"]) for r in newdb.conn.execute("SELECT id,name FROM duty_intervals").fetchall()}
-                    av_rows = source.conn.execute("SELECT teacher_id,weekday,interval_id,available FROM teacher_interval_availability").fetchall()
-                    for r in av_rows:
-                        nt = teacher_map.get(int(r["teacher_id"]))
-                        name = interval_name_by_id.get(int(r["interval_id"]))
-                        ni = new_interval_by_name.get(name) if name else None
-                        if nt and ni:
-                            newdb.conn.execute("INSERT OR REPLACE INTO teacher_interval_availability(teacher_id,weekday,interval_id,available) VALUES(?,?,?,?)", (nt, r["weekday"], ni, r["available"]))
-                    if copy_shifts.get():
-                        source_shift_name={int(r["id"]):r["name"] for r in source.conn.execute("SELECT id,name FROM shifts").fetchall()}
-                        new_shift_by_name={r["name"]:int(r["id"]) for r in newdb.conn.execute("SELECT id,name FROM shifts").fetchall()}
-                        for r in source.conn.execute("SELECT teacher_id,weekday,shift_id,available FROM teacher_shift_availability").fetchall():
-                            nt=teacher_map.get(int(r["teacher_id"])); ns=new_shift_by_name.get(source_shift_name.get(int(r["shift_id"]),""))
-                            if nt and ns:newdb.conn.execute("INSERT OR REPLACE INTO teacher_shift_availability(teacher_id,weekday,shift_id,available) VALUES(?,?,?,?)",(nt,r["weekday"],ns,r["available"]))
-                        # Περιορισμοί τομέων βαρδιών ανά εκπαιδευτικό, με αντιστοίχιση ονομασίας τομέα.
-                        for r in source.conn.execute("SELECT teacher_id,area_id FROM teacher_shift_area_permissions").fetchall():
-                            nt=teacher_map.get(int(r["teacher_id"])); na=new_area_by_name.get(old_area_name.get(int(r["area_id"]),""))
-                            if nt and na:newdb.conn.execute("INSERT OR IGNORE INTO teacher_shift_area_permissions(teacher_id,area_id) VALUES(?,?)",(nt,na))
-
-                newdb.conn.commit()
-                newdb.close()
+                opts = {"teachers": copy_teachers.get(), "availability": copy_availability.get(), "areas": copy_areas.get(),
+                        "intervals": copy_intervals.get(), "shifts": copy_shifts.get(), "mode": copy_mode.get(), "school": copy_school.get()}
+                sy = self.create_school_year(year_cb.get(), start_e.get(), end_e.get(), opts)
                 win.destroy()
                 self.switch_school_year(sy, show_message=False)
                 messagebox.showinfo("Νέο σχολικό έτος", f"Δημιουργήθηκε και άνοιξε το {sy}.")
             except Exception as e:
-                try:
-                    if 'newdb' in locals():
-                        newdb.close()
-                except Exception:
-                    pass
                 messagebox.showerror("Νέο σχολικό έτος", str(e))
 
         buttons = ttk.Frame(outer)

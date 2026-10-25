@@ -148,7 +148,7 @@ class WebUI:
                 body: Dict[str, Any] = {}
                 if method == "POST":
                     n = int(self.headers.get("Content-Length") or 0)
-                    is_raw = u.path.startswith("/api/backup/") and (self.headers.get("Content-Type") or "").startswith("application/octet-stream")
+                    is_raw = u.path.startswith(("/api/backup/", "/api/timetable/")) and (self.headers.get("Content-Type") or "").startswith("application/octet-stream")
                     if n > (80_000_000 if is_raw else 2_000_000):
                         return self._json(413, {"error": "Το αρχείο είναι πολύ μεγάλο"})
                     raw = self.rfile.read(n) if n else b""
@@ -1112,6 +1112,239 @@ class WebUI:
         if not name.startswith("Efimeries_Auto_") or not f.is_file():
             raise ApiError("Δεν βρέθηκε το αντίγραφο")
         return self._do_restore(f.read_bytes(), True)
+
+    # ------------------------------------------------------- σχολικά έτη (v0.66)
+    def api_years(self, p, b):
+        app, m = self.app, self.mod
+        years = app.available_school_years()
+        info = []
+        for y in years:
+            n = None
+            if y == app.active_school_year:
+                n = self.db.conn.execute("SELECT COUNT(*) FROM assignments").fetchone()[0]
+            info.append({"year": y, "active": y == app.active_school_year, "assignments": n})
+        opts = [y for y in app.school_year_options() if y not in years]
+        defaults = {y: list(app.dates_from_school_year(y)) for y in opts}
+        suggested = ""
+        try:
+            cur = int(app.active_school_year.split("-")[0])
+            suggested = f"{cur + 1}-{cur + 2}" if f"{cur + 1}-{cur + 2}" in opts else (opts[0] if opts else "")
+        except Exception:
+            pass
+        return {"years": info, "active": app.active_school_year, "options": opts, "defaults": defaults, "suggested": suggested}
+
+    def api_year_switch(self, p, b):
+        app, m = self.app, self.mod
+        sy = m.normalize_school_year(str(b.get("year", "")))
+        try:
+            app.switch_school_year(sy, show_message=False)
+        except FileNotFoundError as e:
+            raise ApiError(str(e), 404)
+        return {"ok": True, "year": sy}
+
+    def api_year_create(self, p, b):
+        app, m = self.app, self.mod
+        c = b.get("copy") or {}
+        opts = {k: 1 if c.get(k) else 0 for k in ("teachers", "availability", "areas", "intervals", "shifts", "mode", "school")}
+        try:
+            sy = app.create_school_year(str(b.get("year", "")), str(m.ui_date(b.get("start", ""))), str(m.ui_date(b.get("end", ""))), opts)
+        except ValueError as e:
+            raise ApiError(str(e))
+        app.switch_school_year(sy, show_message=False)
+        return {"ok": True, "year": sy}
+
+    def api_year_delete(self, p, b):
+        app, m = self.app, self.mod
+        sy = m.normalize_school_year(str(b.get("year", "")))
+        years = app.available_school_years()
+        if sy not in years:
+            raise ApiError("Το σχολικό έτος δεν βρέθηκε", 404)
+        if len(years) <= 1:
+            raise ApiError("Δεν μπορεί να διαγραφεί το μοναδικό σχολικό έτος. Δημιούργησε πρώτα ένα νέο.")
+        path = m.year_db_path(sy)
+        if sy == app.active_school_year:
+            app.auto_backup("delete-year")
+            nxt = [y for y in years if y != sy][-1]
+            app.db.close()
+            path.unlink(missing_ok=True)
+            app.db = m.DB(m.year_db_path(nxt), nxt)
+            app.active_school_year = nxt
+            m.ACTIVE_YEAR_FILE.write_text(nxt, encoding="utf-8")
+            app.sync_school_year_fields()
+            app.refresh_all()
+        else:
+            if path.exists():
+                import sqlite3
+                other = sqlite3.connect(path)
+                try:
+                    app.auto_backup("delete-year", conn=other, sy=sy)
+                finally:
+                    other.close()
+            path.unlink(missing_ok=True)
+            app.refresh_school_year_selector()
+        return {"ok": True, "active": app.active_school_year}
+
+    # ------------------------------------------------------------ ωρολόγιο (v0.66)
+    def api_timetable_template(self, p, b):
+        m = self.mod
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "t.xlsx"
+            m.write_xlsx(path, [
+                ("Ωρολόγιο", ["Εκπαιδευτικός", "Ημέρα", "Ώρα"],
+                 [("Παπαδοπούλου Μαρία", "Δευτέρα", 1), ("Παπαδοπούλου Μαρία", "Δευτέρα", 2), ("Παπαδοπούλου Μαρία", "Τετάρτη", 3),
+                  ("Γεωργίου Νίκος", "Τρίτη", 1), ("Γεωργίου Νίκος", "Τρίτη", 2)], [28, 14, 8]),
+                ("Ώρες", ["Ώρα", "Από", "Έως"],
+                 [(1, "08:15", "09:00"), (2, "09:00", "09:45"), (3, "10:00", "10:45"), (4, "10:45", "11:30"), (5, "11:45", "12:30"), (6, "12:30", "13:15")], [8, 10, 10]),
+            ])
+            data = path.read_bytes()
+        return ("file", "Prototypo_Orologiou.xlsx", data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    def api_timetable_preview(self, p, b):
+        m = self.mod
+        raw = b.get("_raw") or b""
+        name = os.path.basename(str(p.get("name", "")))
+        ext = Path(name).suffix.lower()
+        if ext == ".roz":
+            raise ApiError("Το .roz είναι το εσωτερικό αρχείο του aSc Timetables και δεν διαβάζεται απευθείας. Ανοίξτε το στο aSc και κάντε Αρχείο → Εξαγωγή → XML, μετά εισάγετε εδώ το .xml.")
+        try:
+            tt = m.parse_xlsx_timetable(raw) if ext in (".xlsx", ".xlsm") else m.parse_asc_timetable(raw)
+        except Exception as exc:  # noqa: BLE001
+            raise ApiError(str(exc))
+        info = m.analyze_timetable(tt)
+        teachers = self.db.teachers()
+        used = set()
+        rows = []
+        for nm in sorted(info, key=m._plain):
+            t = m.match_teacher_name(nm, teachers)
+            if t is not None and t.id in used:
+                t = None
+            if t is not None:
+                used.add(t.id)
+            i = info[nm]
+            rows.append({"name": nm, "teacher_id": t.id if t else None, "days": list(i["days"]), "total": i["total"],
+                         "primary": i["primary"], "alternates": list(i["alternates"])})
+        have_times = bool(tt.get("periods")) and any(a and z for a, z in tt["periods"].values())
+        self._tt = {"tt": tt, "info": info}
+        return {"file": name, "rows": rows, "have_times": have_times, "bad_rows": int(tt.get("bad_rows") or 0),
+                "teachers": [{"id": t.id, "name": t.name} for t in teachers if t.active]}
+
+    def api_timetable_apply(self, p, b):
+        st = getattr(self, "_tt", None)
+        if not st:
+            raise ApiError("Η προεπισκόπηση έληξε. Επίλεξε ξανά το αρχείο.")
+        tt, info = st["tt"], st["info"]
+        by_id = {t.id: t for t in self.db.teachers()}
+        matches = b.get("matches") or {}
+        rows = []
+        used = set()
+        for nm in sorted(info, key=self.mod._plain):
+            tid = matches.get(nm)
+            t = by_id.get(int(tid)) if tid not in (None, "", 0) else None
+            if t is not None:
+                if t.id in used:
+                    raise ApiError(f"Ο/Η «{t.name}» έχει επιλεγεί για δύο ονόματα του ωρολογίου.")
+                used.add(t.id)
+            rows.append((nm, t, info[nm]))
+        have_times = bool(tt.get("periods")) and any(a and z for a, z in tt["periods"].values())
+        opt = {"days": bool(b.get("days", True)), "primary": bool(b.get("primary", True)), "breaks": bool(b.get("breaks")) and have_times, "create": bool(b.get("create"))}
+        if not (opt["days"] or opt["primary"] or opt["breaks"]):
+            raise ApiError("Επίλεξε τουλάχιστον ένα στοιχείο προς ενημέρωση.")
+        with _Captured() as cap:
+            res = self.app._apply_timetable(rows, tt, opt)
+        if not res:
+            raise ApiError("Η εισαγωγή απέτυχε και δεν έγινε καμία αλλαγή. " + " ".join(cap.messages))
+        self.app._absent_cache = None
+        self._tt = None
+        return {"ok": True, **res}
+
+    # --------------------------------------------------------------- βάρδιες (v0.66)
+    def _shift_dict(self, sh) -> dict:
+        c = self.db.conn
+        general = [r[0] for r in c.execute("SELECT interval_id FROM shift_interval_map WHERE shift_id=? AND weekday=-1", (sh["id"],))]
+        over = {str(wd): [r[0] for r in c.execute("SELECT interval_id FROM shift_interval_map WHERE shift_id=? AND weekday=?", (sh["id"], wd))] for wd in range(5)}
+        areas = [r[0] for r in c.execute("SELECT area_id FROM shift_area_map WHERE shift_id=?", (sh["id"],))]
+        return {"id": sh["id"], "name": sh["name"], "active": int(sh["active"]), "has_reserve": int(sh["has_reserve"]), "sort_order": int(sh["sort_order"]),
+                "general": general, "overrides": over, "areas": areas}
+
+    def api_shifts(self, p, b):
+        db = self.db
+        return {"shifts": [self._shift_dict(sh) for sh in db.shifts(False)],
+                "intervals": [{"id": r["id"], "name": r["name"], "start": r["start_time"], "end": r["end_time"]} for r in db.intervals(False)],
+                "areas": [{"id": r["id"], "name": r["name"]} for r in db.areas(False)],
+                "mode": db.get_setting("mode", "daily")}
+
+    def api_shift_save(self, p, b):
+        c = self.db.conn
+        name = str(b.get("name") or "").strip()
+        general = [int(x) for x in b.get("general") or []]
+        areas = [int(x) for x in b.get("areas") or []]
+        if not name:
+            raise ApiError("Δώσε όνομα βάρδιας.")
+        if not general:
+            raise ApiError("Επίλεξε τουλάχιστον μία γενική χρονική ζώνη.")
+        if not areas:
+            raise ApiError("Επίλεξε τουλάχιστον έναν τομέα.")
+        sid = int(b.get("id") or 0)
+        vals = (name, 1 if b.get("active", 1) else 0, max(0, min(99, int(b.get("sort_order") or 0))), 1 if b.get("has_reserve", 1) else 0)
+        try:
+            if sid:
+                if not c.execute("SELECT 1 FROM shifts WHERE id=?", (sid,)).fetchone():
+                    raise ApiError("Η βάρδια δεν βρέθηκε", 404)
+                c.execute("UPDATE shifts SET name=?,active=?,sort_order=?,has_reserve=? WHERE id=?", (*vals, sid))
+            else:
+                sid = c.execute("INSERT INTO shifts(name,active,sort_order,has_reserve) VALUES(?,?,?,?)", vals).lastrowid
+            self.app._save_shift_maps(sid, {"general": general, "areas": areas,
+                                             "overrides": {int(k): [int(x) for x in v] for k, v in (b.get("overrides") or {}).items() if 0 <= int(k) <= 4}})
+            c.commit()
+        except ApiError:
+            c.rollback()
+            raise
+        except Exception as e:  # noqa: BLE001
+            c.rollback()
+            if "UNIQUE" in str(e):
+                raise ApiError("Υπάρχει ήδη βάρδια με αυτό το όνομα")
+            raise
+        self.app.refresh_all()
+        return {"ok": True, "id": sid}
+
+    def api_shift_delete(self, p, b):
+        c = self.db.conn
+        c.execute("DELETE FROM shifts WHERE id=?", (int(b.get("id", 0)),))
+        c.commit()
+        self.app.refresh_all()
+        return {"ok": True}
+
+    def api_teacher_extra(self, p, b):
+        db = self.db
+        tid = int(p.get("id", 0))
+        sav = db.get_teacher_shift_availability(tid)
+        iav = db.get_teacher_interval_availability(tid)
+        allowed = sorted(db.teacher_shift_allowed_areas(tid))
+        return {"shifts": [{"id": s["id"], "name": s["name"]} for s in db.shifts(True)],
+                "shift_avail": {f"{wd}-{sid}": v for (wd, sid), v in sav.items()},
+                "intervals": [{"id": r["id"], "name": r["name"], "start": r["start_time"], "end": r["end_time"]} for r in db.intervals(True)],
+                "interval_avail": {f"{wd}-{iid}": v for (wd, iid), v in iav.items()},
+                "areas": [{"id": r["id"], "name": r["name"]} for r in db.areas(True)], "allowed": allowed}
+
+    def api_teacher_extra_save(self, p, b):
+        db = self.db
+        tid = int(b.get("id", 0))
+        if not db.conn.execute("SELECT 1 FROM teachers WHERE id=?", (tid,)).fetchone():
+            raise ApiError("Ο/Η εκπαιδευτικός δεν βρέθηκε", 404)
+        def pairs(d):
+            out = {}
+            for k, v in (d or {}).items():
+                a, z = k.split("-")
+                out[(int(a), int(z))] = 1 if v else 0
+            return out
+        db.set_teacher_shift_availability(tid, pairs(b.get("shift_avail")))
+        db.set_teacher_interval_availability(tid, pairs(b.get("interval_avail")))
+        areas = [r["id"] for r in db.areas(True)]
+        chosen = [int(x) for x in b.get("allowed") or []] or areas
+        db.set_teacher_shift_allowed_areas(tid, chosen, areas)
+        self.app._absent_cache = None
+        self.app.refresh_all()
+        return {"ok": True}
 
     # ---------------------------------------------------------------- λοιπά
     def api_classic(self, p, b):

@@ -332,7 +332,7 @@ function editTeacher(t){
       h("p",{class:"m",style:"color:var(--muted)"},"Πάτησε με τη σειρά που προτιμάς: ο αριθμός δείχνει τη σειρά προτεραιότητας."),
       h("div",{class:"row",style:"margin-top:8px"},cb("Συμμετέχει στον κύκλο πρόσθετων εφημεριών",st.extra_cycle,v=>st.extra_cycle=v?1:0)),
       h("label",{class:"f",style:"margin-top:14px"},"Σημειώσεις",notes),
-      h("p",{class:"m",style:"color:var(--muted);margin-top:14px"},"Διαθεσιμότητα ανά διάλειμμα/βάρδια: από τις Ρυθμίσεις → Εφαρμογή → «Για προχωρημένους»."))}
+      h("div",{class:"row",style:"margin-top:16px"},h("button",{class:"btn",id:"t-extra",onclick:()=>editTeacherExtra(t)},"Διαθεσιμότητα ανά διάλειμμα και βάρδια…")))}
   function cb(l,v,f){const i=h("input",{type:"checkbox",onchange:e=>f(e.target.checked)});i.checked=!!v;return h("label",{class:"row",style:"cursor:pointer"},i,l)}
   draw();
   openDrawer(t.name,"",body,[h("button",{class:"btn",onclick:closeDrawer},"Άκυρο"),h("button",{class:"btn pri",onclick:e=>guard(async()=>{st.name=name.value;st.notes=notes.value;await api("/api/teacher/save",st);closeDrawer();toast("Αποθηκεύτηκε");route()},e.target)},"Αποθήκευση")])}
@@ -421,8 +421,8 @@ TAB.app=async v=>{
     h("div",{class:"row"},ubtn,ust),h("label",{class:"row",style:"cursor:pointer;margin-top:10px"},acb,"Αυτόματος έλεγχος για νέα έκδοση στην εκκίνηση (το πολύ μία φορά το 24ωρο)")));
   v.append(h("div",{class:"card",style:"margin-top:16px"},h("h2",{},"Πληροφορίες"),h("p",{class:"m",style:"margin:0;color:var(--muted)"},`Έκδοση v${S.version} (${S.arch}) · Φάκελος δεδομένων: ${S.data_dir}`),
     h("div",{class:"row",style:"margin-top:12px"},h("button",{class:"btn danger",onclick:()=>{if(confirm("Να κλείσει η εφαρμογή;"))api("/api/quit",{}).then(()=>{document.body.innerHTML='<div style="padding:60px;text-align:center;font:16px system-ui">Η εφαρμογή έκλεισε. Μπορείτε να κλείσετε αυτό το παράθυρο.</div>'}).catch(()=>{})}},"Έξοδος από την εφαρμογή"))));
-  v.append(h("div",{class:"card",style:"margin-top:16px"},h("h2",{},"Για προχωρημένους (κλασική διεπαφή)"),h("p",{class:"m",style:"color:var(--muted);margin-top:-4px"},"Αυτά δεν έχουν ακόμη μεταφερθεί στη νέα διεπαφή· ανοίγουν με ένα κλικ στην κλασική."),
-    h("div",{class:"row"},[["Σχολικό έτος, backup, ωρολόγιο","settings"],["Εκτυπώσεις και Excel","reports"],["Βάρδιες","shifts"]].map(([l,t])=>h("button",{class:"btn",onclick:()=>classic(t)},l)))));
+  v.append(h("div",{class:"card",style:"margin-top:16px"},h("h2",{},"Κλασική διεπαφή"),h("p",{class:"m",style:"color:var(--muted);margin-top:-4px"},"Όλες οι λειτουργίες υπάρχουν πλέον στη νέα διεπαφή. Η κλασική παραμένει διαθέσιμη ως εφεδρική επιλογή."),
+    h("div",{class:"row"},h("button",{class:"btn",id:"open-classic",onclick:()=>classic("")},"Άνοιγμα κλασικής διεπαφής"))))
 };
 
 /* ---------------- Εκτυπώσεις ---------------- */
@@ -472,11 +472,103 @@ PAGE.reports=async v=>{
           h("li",{},"Google Calendar (υπολογιστής): calendar.google.com → Ρυθμίσεις (γρανάζι) → Εισαγωγή και εξαγωγή → Εισαγωγή → διάλεξε το αρχείο .ics. Μετά εμφανίζεται αυτόματα και στο κινητό."),
           h("li",{},"Android / iPhone: στείλε το αρχείο στον εκπαιδευτικό (email, Viber κ.λπ.) και πάτησέ το από το κινητό· ανοίγει στο ημερολόγιο και ζητά επιβεβαίωση."),
           h("li",{},"Το αρχείο είναι στιγμιότυπο: αν αλλάξει το πρόγραμμα, κατέβασε και στείλε ξανά νέο αρχείο (οι εφημερίες ενημερώνονται αντί να διπλασιάζονται)."))))) };
+/* ---------------- Σχολικό έτος ---------------- */
+TAB.year=async v=>{
+  const Y=await api("/api/years");
+  const rows=Y.years.map(y=>({o:y,cells:[h("b",{},y.year),h("span",{class:"chip "+(y.active?"ok":"")},y.active?"ενεργό":""),y.active&&y.assignments!=null?y.assignments+" εφημερίες":"",
+    h("div",{class:"row",style:"gap:6px"},y.active?"":h("button",{class:"btn sm",onclick:e=>{e.stopPropagation();guard(async()=>{await api("/api/year/switch",{year:y.year});S=null;toast("Άνοιξε το σχολικό έτος "+y.year);route()},e.currentTarget)}},"Άνοιγμα"),
+      h("button",{class:"btn sm danger",onclick:e=>{e.stopPropagation();if(!confirm("Θα διαγραφούν ΟΛΑ τα δεδομένα του "+y.year+": πρόγραμμα, εκπαιδευτικοί, ειδικές ημέρες και ιστορικό αλλαγών.\n\nΘα παρθεί πρώτα αυτόματο αντίγραφο ασφαλείας, αλλά η ενέργεια δεν αναιρείται από την εφαρμογή. Να συνεχίσω;"))return;guard(async()=>{await api("/api/year/delete",{year:y.year});S=null;toast("Το σχολικό έτος "+y.year+" διαγράφηκε");route()},e.currentTarget)}},"Διαγραφή"))]}));
+  v.append(h("div",{class:"card",style:"padding:6px 10px"},simpleTable(["Σχολικό έτος","Κατάσταση","Περιεχόμενο",""],rows,()=>{},"—")));
+  if(!Y.options.length){v.append(h("p",{class:"m",style:"color:var(--muted)"},"Δεν υπάρχουν άλλα διαθέσιμα σχολικά έτη για δημιουργία."));return}
+  const sel=h("select",{id:"ny-year"},Y.options.map(o=>h("option",{value:o},o)));sel.value=Y.suggested||Y.options[0];
+  const a=h("input",{type:"date",id:"ny-from"}),z=h("input",{type:"date",id:"ny-to"});
+  const fill=()=>{const d=Y.defaults[sel.value];a.value=d[0];z.value=d[1]};sel.onchange=fill;fill();
+  const C={teachers:1,availability:0,areas:1,intervals:1,shifts:1,mode:1,school:1};
+  const opt=(k,l,ind)=>h("label",{class:"row",style:"cursor:pointer"+(ind?";margin-left:24px":"")},(()=>{const i=h("input",{type:"checkbox",onchange:e=>C[k]=e.target.checked?1:0});i.checked=!!C[k];return i})(),l);
+  v.append(h("div",{class:"card"},h("h2",{},"Νέο σχολικό έτος"),
+    h("p",{class:"m",style:"color:var(--muted)"},"Το νέο έτος ξεκινά χωρίς πρόγραμμα, πραγματοποιημένες εφημερίες, αντικαταστάσεις ή ειδικές ημέρες. Επιλέγεις τι θα αντιγραφεί από το "+Y.active+"."),
+    h("div",{class:"row",style:"flex-wrap:wrap"},fld("Σχολικό έτος",sel),fld("Έναρξη μαθημάτων",a),fld("Λήξη μαθημάτων",z)),
+    h("h2",{style:"margin-top:16px"},"Αντιγραφή από το "+Y.active),
+    opt("teachers","Εκπαιδευτικοί (ονόματα, συμμετοχή, παρατηρήσεις)"),opt("availability","Μαζί και διαθεσιμότητες / κύρια και εναλλακτικές ημέρες",1),
+    opt("areas","Τομείς εφημερίας"),opt("intervals","Χρονικές ζώνες / διαλείμματα"),opt("shifts","Βάρδιες και αντιστοίχιση τομέων"),
+    opt("mode","Τρόπος εφημερίας (ανά ημέρα / διάλειμμα / βάρδια)"),opt("school","Στοιχεία σχολείου και μέγεθος εκτύπωσης"),
+    h("div",{class:"row",style:"margin-top:16px"},h("button",{class:"btn pri",id:"ny-go",onclick:e=>guard(async()=>{
+      await api("/api/year/create",{year:sel.value,start:a.value,end:z.value,copy:C});S=null;toast("Δημιουργήθηκε και άνοιξε το "+sel.value,6000);route()},e.currentTarget)},"Δημιουργία και άνοιγμα"))))};
+/* ---------------- Ωρολόγιο ---------------- */
+let TT=null;
+TAB.timetable=async v=>{
+  const box=h("div");
+  const file=h("input",{type:"file",accept:".xml,.xlsx,.xlsm,.roz",style:"display:none",id:"tt-file",onchange:e=>guard(async()=>{
+    const f=e.target.files[0];if(!f)return;
+    let r;try{r=await fetch("/api/timetable/preview?name="+encodeURIComponent(f.name),{method:"POST",headers:{"X-Token":TOKEN,"Content-Type":"application/octet-stream"},body:f})}catch(x){throw new Error("Η εφαρμογή δεν ανταποκρίνεται.")}
+    const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||("Σφάλμα "+r.status));TT=j;e.target.value="";drawTT()},e.target)});
+  v.append(h("div",{class:"card"},h("h2",{},"Εισαγωγή ωρολογίου προγράμματος"),
+    h("p",{class:"m",style:"color:var(--muted)"},"Από το ωρολόγιο του σχολείου η εφαρμογή βρίσκει ποιες ημέρες διδάσκει ο καθένας, ποιες ημέρες έχει τις λιγότερες ώρες (προτεινόμενες για εφημερία) και πότε βρίσκεται στο σχολείο. Δέχεται αρχείο XML του aSc Timetables ή Excel."),
+    h("div",{class:"row",style:"flex-wrap:wrap"},h("button",{class:"btn pri",id:"tt-pick",onclick:()=>file.click()},"Επιλογή αρχείου (.xml ή .xlsx)…"),h("button",{class:"btn",id:"tt-tpl",onclick:()=>{location.href="/api/timetable/template?t="+TOKEN}},"Λήψη πρότυπου Excel"),file),
+    h("p",{class:"m",style:"color:var(--muted)"},"Αρχείο .roz του aSc: άνοιξέ το στο aSc και κάνε Αρχείο → Εξαγωγή → XML.")),box);
+  function drawTT(){
+    if(!TT){box.replaceChildren();return}
+    const O={days:true,primary:true,breaks:TT.have_times,create:false},M={};
+    TT.rows.forEach(r=>M[r.name]=r.teacher_id);
+    const found=TT.rows.filter(r=>r.teacher_id).length,dn=["Δε","Τρ","Τε","Πε","Πα"];
+    const ck=(k,l,dis)=>{const i=h("input",{type:"checkbox",disabled:!!dis,onchange:e=>O[k]=e.target.checked});i.checked=!!O[k]&&!dis;return h("label",{class:"row",style:"cursor:pointer"},i,l)};
+    const trs=TT.rows.map(r=>{const sl=h("select",{onchange:e=>M[r.name]=e.target.value?+e.target.value:null,style:"max-width:240px"},h("option",{value:""},"— δεν αντιστοιχίστηκε —"),...TT.teachers.map(t=>h("option",{value:t.id},t.name)));sl.value=r.teacher_id||"";
+      return h("tr",{},h("td",{},r.name),h("td",{},sl),h("td",{},r.days.map(d=>dn[d]).join(" ")),h("td",{},r.total),h("td",{},r.primary>=0?dn[r.primary]:""),h("td",{},r.alternates.map(d=>dn[d]).join(" ")))});
+    box.replaceChildren(h("div",{class:"card"},h("h2",{},"Προεπισκόπηση: "+TT.file),
+      h("p",{class:"m",style:"color:var(--muted)"},TT.rows.length+" εκπαιδευτικοί στο ωρολόγιο · "+found+" αντιστοιχίστηκαν αυτόματα με εκπαιδευτικούς της εφαρμογής."+(TT.bad_rows?" Αγνοήθηκαν "+TT.bad_rows+" μη έγκυρες γραμμές.":"")+" Διόρθωσε όπου χρειάζεται την αντιστοίχιση."),
+      h("div",{style:"overflow:auto;max-height:420px"},h("table",{},h("thead",{},h("tr",{},["Όνομα στο ωρολόγιο","Εκπαιδευτικός εφαρμογής","Ημέρες","Ώρες/εβδ.","Κύρια","Εναλλακτικές"].map(c=>h("th",{},c)))),h("tbody",{},trs))),
+      h("h2",{style:"margin-top:16px"},"Τι θα ενημερωθεί"),
+      ck("days","Ημέρες παρουσίας (διαθέσιμες ημέρες = ημέρες που διδάσκει)"),ck("primary","Κύρια και εναλλακτικές ημέρες (πρώτα οι ημέρες με τις λιγότερες ώρες)"),
+      ck("breaks","Διαθεσιμότητα ανά διάλειμμα (διαθέσιμος όταν βρίσκεται στο σχολείο)",!TT.have_times),
+      TT.have_times?"":h("p",{class:"m",style:"color:var(--muted);margin:0 0 0 24px"},"Δεν υπάρχουν ώρες ρολογιού στο αρχείο (στο Excel πρόσθεσε το φύλλο «Ώρες»)."),
+      ck("create","Δημιουργία εκπαιδευτικών που δεν υπάρχουν στην εφαρμογή"),
+      h("div",{class:"row",style:"margin-top:14px"},h("button",{class:"btn pri",id:"tt-apply",onclick:e=>guard(async()=>{
+        const n=Object.values(M).filter(Boolean).length;
+        if(!confirm("Θα ενημερωθεί η διαθεσιμότητα για "+(O.create?TT.rows.length:n)+" εκπαιδευτικούς (οι υπάρχουσες τιμές θα αντικατασταθούν).\nΠριν από την αλλαγή θα παρθεί αυτόματο αντίγραφο ασφαλείας.\n\nΝα συνεχιστεί;"))return;
+        const r=await api("/api/timetable/apply",{...O,matches:M});TT=null;drawTT();
+        toast("Ενημερώθηκαν "+r.updated+" εκπαιδευτικοί"+(r.created?" (νέοι: "+r.created+")":"")+(r.skipped.length?" · χωρίς αντιστοίχιση: "+r.skipped.length:"")+". Για να εφαρμοστεί στο πρόγραμμα, κάνε νέα παραγωγή.",9000)},e.currentTarget)},"Εφαρμογή"),
+        h("button",{class:"btn",onclick:()=>{TT=null;drawTT()}},"Άκυρο"))))}
+  drawTT()};
+/* ---------------- Βάρδιες ---------------- */
+TAB.shifts=async v=>{
+  const D=await api("/api/shifts"),iname=Object.fromEntries(D.intervals.map(i=>[i.id,i.name])),aname=Object.fromEntries(D.areas.map(a=>[a.id,a.name]));
+  v.append(h("div",{class:"row",style:"margin-bottom:12px"},h("p",{class:"m",style:"color:var(--muted);margin:0"},"Κάθε βάρδια αποτελείται από χρονικές ζώνες και τομείς. Χρησιμοποιούνται όταν ο τρόπος εφημερίας (Παραγωγή) είναι «ανά βάρδια»."+(D.mode!=="shifts"?" Τώρα ο τρόπος είναι διαφορετικός, οπότε δεν επηρεάζουν το πρόγραμμα.":"")),h("div",{class:"sp"}),h("button",{class:"btn pri",id:"sh-new",onclick:()=>editShift(null,D)},"+ Νέα βάρδια")));
+  v.append(h("div",{class:"card",style:"padding:6px 10px"},simpleTable(["Βάρδια","Ζώνες","Τομείς","Αναπληρωματικός","Κατάσταση"],D.shifts.map(s=>({o:s,cells:[h("b",{},s.name),s.general.map(i=>iname[i]).filter(Boolean).join(", ")||"—",s.areas.map(i=>aname[i]).filter(Boolean).join(", ")||"—",s.has_reserve?"Ναι":"Όχι",h("span",{class:"chip "+(s.active?"ok":"")},s.active?"ενεργή":"ανενεργή")]})),s=>editShift(s,D),"Δεν υπάρχουν βάρδιες.")))};
+function editShift(s,D){
+  const st=s?JSON.parse(JSON.stringify(s)):{id:0,name:"",active:1,has_reserve:1,sort_order:0,general:[],overrides:{0:[],1:[],2:[],3:[],4:[]},areas:D.areas.map(a=>a.id)};
+  const name=h("input",{type:"text",value:st.name,style:"width:100%"}),ord=h("input",{type:"number",min:0,max:99,value:st.sort_order,style:"width:90px"});
+  const set=(arr,id,on)=>{const i=arr.indexOf(id);if(on&&i<0)arr.push(id);if(!on&&i>=0)arr.splice(i,1)};
+  const ck=(arr,id,l)=>{const i=h("input",{type:"checkbox",onchange:e=>set(arr,id,e.target.checked)});i.checked=arr.includes(id);return h("label",{class:"row",style:"cursor:pointer"},i,l)};
+  const cb=(l,k)=>{const i=h("input",{type:"checkbox",onchange:e=>st[k]=e.target.checked?1:0});i.checked=!!st[k];return h("label",{class:"row",style:"cursor:pointer"},i,l)};
+  const days=["Δευτέρα","Τρίτη","Τετάρτη","Πέμπτη","Παρασκευή"];
+  if(!st.overrides)st.overrides={};for(let d=0;d<5;d++)st.overrides[d]=st.overrides[d]||[];
+  const body=[h("label",{class:"f"},"Όνομα βάρδιας",name),h("div",{class:"row",style:"margin-top:10px"},cb("Ενεργή","active"),cb("Ορισμός αναπληρωματικού","has_reserve"),h("div",{class:"sp"}),fld("Σειρά",ord)),
+    h("h2",{style:"margin-top:14px"},"Χρονικές ζώνες της βάρδιας (όλες οι ημέρες)"),...D.intervals.map(i=>ck(st.general,i.id,i.name+" ("+i.start+"–"+i.end+")")),
+    h("h2",{style:"margin-top:14px"},"Τομείς που καλύπτει"),...D.areas.map(a=>ck(st.areas,a.id,a.name)),
+    h("details",{style:"margin-top:14px"},h("summary",{},"Διαφορετική σύνθεση ορισμένες ημέρες (προαιρετικά)"),
+      h("p",{class:"m",style:"color:var(--muted)"},"Άφησε μια ημέρα χωρίς επιλογή για να ισχύει η γενική σύνθεση. Αν επιλέξεις έστω μία ζώνη, εκείνη η ημέρα χρησιμοποιεί μόνο αυτές."),
+      ...days.map((dn,d)=>h("div",{},h("b",{},dn),...D.intervals.map(i=>ck(st.overrides[d],i.id,i.name)))))];
+  const foot=[];if(s)foot.push(h("button",{class:"btn danger",onclick:()=>{if(confirm("Να διαγραφεί η βάρδια και οι ρυθμίσεις της; Το ήδη παραχθέν πρόγραμμα δεν διαγράφεται."))guard(async()=>{await api("/api/shift/delete",{id:s.id});closeDrawer();route()})}},"Διαγραφή"));
+  foot.push(h("div",{class:"sp"}),h("button",{class:"btn",onclick:closeDrawer},"Άκυρο"),saveBtn(async()=>{await api("/api/shift/save",{...st,name:name.value,sort_order:+ord.value});closeDrawer();toast("Αποθηκεύτηκε");route()}));
+  openDrawer(s?s.name:"Νέα βάρδια","",body,foot);setTimeout(()=>name.focus(),50)}
+/* ---------------- Διαθεσιμότητα εκπαιδευτικού ανά διάλειμμα / βάρδια ---------------- */
+async function editTeacherExtra(t){
+  const X=await api("/api/teacher/extra?id="+t.id);
+  const dn=["Δε","Τρ","Τε","Πε","Πα"],SA={...X.shift_avail},IA={...X.interval_avail},allowed=new Set(X.allowed.length?X.allowed:X.areas.map(a=>a.id));
+  const grid=(items,map,title)=>{if(!items.length)return h("p",{class:"m",style:"color:var(--muted)"},"Δεν υπάρχουν ενεργές εγγραφές.");
+    return h("div",{style:"overflow:auto"},h("table",{},h("thead",{},h("tr",{},h("th",{},title),...dn.map(d=>h("th",{},d)))),h("tbody",{},items.map(it=>h("tr",{},h("td",{},it.name+(it.start?" "+it.start+"–"+it.end:"")),...dn.map((d,wd)=>{const k=wd+"-"+it.id;const i=h("input",{type:"checkbox",disabled:!t.days[wd],onchange:e=>map[k]=e.target.checked?1:0});i.checked=t.days[wd]?(k in map?!!map[k]:true):false;return h("td",{style:"text-align:center"},i)}))))))};
+  const body=[h("p",{class:"m",style:"color:var(--muted)"},"Τσέκαρε πότε μπορεί να εφημερεύει ο/η εκπαιδευτικός. Οι ημέρες που δεν είναι στο σχολείο είναι κλειδωμένες. Ό,τι δεν έχει οριστεί θεωρείται διαθέσιμο."),
+    h("h2",{},"Ανά διάλειμμα / χρονική ζώνη"),grid(X.intervals,IA,"Ζώνη"),h("h2",{style:"margin-top:16px"},"Ανά βάρδια"),grid(X.shifts,SA,"Βάρδια"),
+    h("h2",{style:"margin-top:16px"},"Τομείς που επιτρέπονται σε βάρδιες"),h("p",{class:"m",style:"color:var(--muted)"},"Περιόρισε μόνο αν ο/η εκπαιδευτικός μπορεί να εφημερεύει σε συγκεκριμένους χώρους. Όλοι επιλεγμένοι = χωρίς περιορισμό."),
+    ...X.areas.map(a=>{const i=h("input",{type:"checkbox",onchange:e=>{e.target.checked?allowed.add(a.id):allowed.delete(a.id)}});i.checked=allowed.has(a.id);return h("label",{class:"row",style:"cursor:pointer"},i,a.name)})];
+  openDrawer(t.name,"Διαθεσιμότητα ανά διάλειμμα και βάρδια",body,[h("button",{class:"btn",onclick:closeDrawer},"Άκυρο"),saveBtn(async()=>{
+    if(!allowed.size)throw new Error("Επίλεξε τουλάχιστον έναν τομέα");
+    await api("/api/teacher/extra/save",{id:t.id,shift_avail:SA,interval_avail:IA,allowed:[...allowed]});closeDrawer();toast("Αποθηκεύτηκε");route()})])}
 /* ---------------- Ρυθμίσεις ---------------- */
 let ST={tab:"school"};
 PAGE.settings=async v=>{
   v.append(h("h1",{},"Ρυθμίσεις"),h("p",{class:"sub"},"Σχολείο, τομείς, χρονικές ζώνες, ειδικές ημέρες και εμφάνιση."));
-  const tabs=[["school","Σχολείο"],["areas","Τομείς"],["intervals","Χρονικές ζώνες"],["days","Ειδικές ημέρες"],["storage","Αποθήκευση"],["backup","Αντίγραφα"],["app","Εφαρμογή"]];
+  const tabs=[["school","Σχολείο"],["year","Σχολικό έτος"],["areas","Τομείς"],["intervals","Χρονικές ζώνες"],["shifts","Βάρδιες"],["days","Ειδικές ημέρες"],["timetable","Ωρολόγιο"],["storage","Αποθήκευση"],["backup","Αντίγραφα"],["app","Εφαρμογή"]];
   v.append(h("div",{class:"seg",style:"margin-bottom:16px;flex-wrap:wrap"},tabs.map(([k,l])=>h("button",{class:ST.tab===k?"on":"",onclick:()=>{ST.tab=k;route()}},l))));
   const box=h("div");v.append(box);await TAB[ST.tab](box)};
 const fld=(l,inp)=>h("label",{class:"f"},l,inp);
@@ -489,7 +581,7 @@ TAB.school=async v=>{
   v.append(h("div",{class:"card"},h("h2",{},"Στοιχεία σχολείου"),h("div",{class:"grid g2"},fld("Ονομασία σχολείου",name),h("div",{}),fld("Τηλέφωνο",phone),fld("Email",mail)),
     h("h2",{style:"margin-top:18px"},"Σχολικό έτος "+g.school_year),h("div",{class:"row"},fld("Έναρξη μαθημάτων",a),fld("Λήξη μαθημάτων",z)),
     h("div",{class:"row",style:"margin-top:16px"},saveBtn(async()=>{await api("/api/settings/save",{school_name:name.value,school_phone:phone.value,school_email:mail.value,start:a.value,end:z.value});toast("Αποθηκεύτηκε");route()})),
-    h("p",{class:"m",style:"color:var(--muted)"},"Αλλαγή σχολικού έτους: Εφαρμογή → «Για προχωρημένους». Αντίγραφα ασφαλείας: καρτέλα «Αντίγραφα».")))};
+    h("p",{class:"m",style:"color:var(--muted)"},"Αλλαγή ή δημιουργία σχολικού έτους: καρτέλα «Σχολικό έτος». Αντίγραφα ασφαλείας: καρτέλα «Αντίγραφα».")))};
 function simpleTable(cols,rows,onrow,empty){return rows.length?h("table",{},h("thead",{},h("tr",{},cols.map(c=>h("th",{},c)))),h("tbody",{},rows.map(r=>h("tr",{class:"clk",onclick:()=>onrow(r.o)},r.cells.map(c=>h("td",{},c)))))):h("div",{class:"empty"},empty)}
 TAB.backup=async v=>{
   const L=await api("/api/backup/list");
