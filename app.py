@@ -38,7 +38,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 
 APP_TITLE = "Εφημερίες Εκπαιδευτικών"
-APP_VERSION = "0.50"
+APP_VERSION = "0.51"
 UPDATE_REPO = "stam1966/efimeries-ekpaideftikon"  # αποθετήριο GitHub από όπου ελέγχονται οι νέες εκδόσεις
 
 # Όρια εργασίας του εβδομαδιαίου σχεδιασμού (προστατεύουν από πολύ αργούς υπολογισμούς σε μεγάλα σχολεία).
@@ -2999,6 +2999,8 @@ class EfimeriesApp(tk.Tk):
 
         secondary = ttk.LabelFrame(outer, text="Εισαγωγή / εξαγωγή", padding=(8, 6))
         secondary.pack(fill="x", pady=(0, 8))
+        ttk.Button(secondary, text="Εισαγωγή ωρολογίου (aSc XML / Excel)…", style="Primary.TButton", command=self.import_timetable).pack(side="left", padx=3)
+        ttk.Button(secondary, text="Πρότυπο xlsx ωρολογίου", command=self.export_timetable_template).pack(side="left", padx=3)
         ttk.Button(secondary, text="Εισαγωγή εκπαιδευτικών από CSV", command=self.import_teachers_csv).pack(side="left", padx=3)
         ttk.Button(secondary, text="Εξαγωγή εκπαιδευτικών σε CSV", command=self.export_teachers_csv).pack(side="left", padx=3)
 
@@ -7175,6 +7177,180 @@ class EfimeriesApp(tk.Tk):
         self.report_to_e.delete(0, "end"); self.report_to_e.insert(0, fmt_date(last))
         self.refresh_reports()
 
+    # ------------------------------------------------------------------
+    #  Εισαγωγή ωρολογίου (aSc XML / xlsx)
+    # ------------------------------------------------------------------
+    def export_timetable_template(self) -> None:
+        path = filedialog.asksaveasfilename(title="Αποθήκευση πρότυπου ωρολογίου", defaultextension=".xlsx",
+                                            initialfile="Prototypo_Orologiou.xlsx", filetypes=[("Excel", "*.xlsx")])
+        if not path:
+            return
+        try:
+            write_xlsx(path, [
+                ("Ωρολόγιο", ["Εκπαιδευτικός", "Ημέρα", "Ώρα"],
+                 [("Παπαδοπούλου Μαρία", "Δευτέρα", 1), ("Παπαδοπούλου Μαρία", "Δευτέρα", 2), ("Παπαδοπούλου Μαρία", "Τετάρτη", 3),
+                  ("Γεωργίου Νίκος", "Τρίτη", 1), ("Γεωργίου Νίκος", "Τρίτη", 2)], [28, 14, 8]),
+                ("Ώρες", ["Ώρα", "Από", "Έως"],
+                 [(1, "08:15", "09:00"), (2, "09:00", "09:45"), (3, "10:00", "10:45"), (4, "10:45", "11:30"), (5, "11:45", "12:30"), (6, "12:30", "13:15")], [8, 10, 10]),
+            ])
+        except Exception as exc:
+            messagebox.showerror("Πρότυπο ωρολογίου", f"Η αποθήκευση απέτυχε:\n{exc}")
+            return
+        messagebox.showinfo("Πρότυπο ωρολογίου", "Αποθηκεύτηκε. Μία γραμμή ανά ώρα διδασκαλίας: Εκπαιδευτικός, Ημέρα, Ώρα.\nΤο φύλλο «Ώρες» (ώρες ρολογιού) είναι προαιρετικό· χρειάζεται μόνο για την αυτόματη διαθεσιμότητα ανά διάλειμμα.")
+
+    def import_timetable(self) -> None:
+        path = filedialog.askopenfilename(title="Εισαγωγή ωρολογίου προγράμματος",
+                                          filetypes=[("Ωρολόγιο (aSc XML ή Excel)", "*.xml *.xlsx *.roz"), ("aSc XML", "*.xml"), ("Excel", "*.xlsx"), ("Όλα", "*.*")])
+        if not path:
+            return
+        ext = Path(path).suffix.lower()
+        if ext == ".roz":
+            messagebox.showinfo("Αρχείο .roz", "Το .roz είναι το εσωτερικό αρχείο του aSc Timetables και δεν διαβάζεται απευθείας.\n\n"
+                                "Ανοίξτε το στο aSc και κάντε: Αρχείο → Εξαγωγή → XML (ή «Εξαγωγή σε XML»). Μετά εισάγετε εδώ το .xml.")
+            return
+        try:
+            raw = Path(path).read_bytes()
+            tt = parse_xlsx_timetable(raw) if ext in (".xlsx", ".xlsm") else parse_asc_timetable(raw)
+        except Exception as exc:
+            messagebox.showerror("Εισαγωγή ωρολογίου", str(exc))
+            return
+        self._timetable_preview(tt, Path(path).name)
+
+    def _timetable_preview(self, tt: dict, filename: str) -> None:
+        info = analyze_timetable(tt)
+        teachers = self.db.teachers()
+        rows = []
+        used = set()
+        for name in sorted(info, key=_plain):
+            t = match_teacher_name(name, teachers)
+            if t is not None and t.id in used:
+                t = None
+            if t is not None:
+                used.add(t.id)
+            rows.append((name, t, info[name]))
+        have_times = bool(tt.get("periods")) and any(a and b for a, b in tt["periods"].values())
+        win = self._modal("Εισαγωγή ωρολογίου προγράμματος", 1040, 660)
+        outer = ttk.Frame(win, padding=14)
+        outer.pack(fill="both", expand=True)
+        ttk.Label(outer, text="Εισαγωγή ωρολογίου προγράμματος", font=("Segoe UI", 15, "bold"), foreground="#34495E").pack(anchor="w")
+        found = sum(1 for _n, t, _i in rows if t)
+        ttk.Label(outer, text=f"Αρχείο: {filename} · {len(rows)} εκπαιδευτικοί στο ωρολόγιο · {found} αντιστοιχίστηκαν με εκπαιδευτικούς της εφαρμογής."
+                              + (f" Αγνοήθηκαν {tt['bad_rows']} μη έγκυρες γραμμές." if tt.get("bad_rows") else ""),
+                  foreground="#5F6B76", wraplength=980).pack(anchor="w", pady=(2, 8))
+        foot = ttk.Frame(outer)
+        foot.pack(side="bottom", fill="x", pady=(10, 0))
+        opts = ttk.LabelFrame(outer, text="Τι θα ενημερωθεί", padding=8)
+        opts.pack(side="bottom", fill="x", pady=(8, 0))
+        v_days = tk.BooleanVar(value=True)
+        v_prim = tk.BooleanVar(value=True)
+        v_brk = tk.BooleanVar(value=have_times)
+        v_new = tk.BooleanVar(value=False)
+        ttk.Checkbutton(opts, text="Ημέρες παρουσίας (διαθέσιμες ημέρες = ημέρες που διδάσκει)", variable=v_days).pack(anchor="w")
+        ttk.Checkbutton(opts, text="Κύρια και εναλλακτικές ημέρες (πρώτα οι ημέρες με τις λιγότερες ώρες διδασκαλίας)", variable=v_prim).pack(anchor="w")
+        cb = ttk.Checkbutton(opts, text="Διαθεσιμότητα ανά διάλειμμα (διαθέσιμος όταν βρίσκεται στο σχολείο εκείνη την ώρα)", variable=v_brk)
+        cb.pack(anchor="w")
+        if not have_times:
+            cb.state(["disabled"])
+            ttk.Label(opts, text="   Δεν υπάρχουν ώρες ρολογιού στο αρχείο (στο xlsx προσθέστε το φύλλο «Ώρες»).", foreground="#7A858C").pack(anchor="w")
+        ttk.Checkbutton(opts, text="Δημιουργία εκπαιδευτικών που δεν υπάρχουν στην εφαρμογή", variable=v_new).pack(anchor="w")
+        cols = ("name", "match", "days", "hours", "primary", "alt")
+        tree = ttk.Treeview(outer, columns=cols, show="headings", height=14)
+        for c, h, w in zip(cols, ("Όνομα στο ωρολόγιο", "Εκπαιδευτικός εφαρμογής", "Ημέρες παρουσίας", "Ώρες/εβδ.", "Κύρια", "Εναλλακτικές"), (230, 230, 170, 80, 90, 190)):
+            tree.heading(c, text=h)
+            tree.column(c, width=w, anchor="w" if c in ("name", "match", "days", "alt") else "center")
+        tree.tag_configure("miss", foreground="#B3261E")
+        dn = ["Δε", "Τρ", "Τε", "Πε", "Πα"]
+        for name, t, i in rows:
+            tree.insert("", "end", tags=("miss",) if t is None else (), values=(
+                name, t.name if t else "— δεν βρέθηκε —", " ".join(dn[d] for d in i["days"]), i["total"],
+                dn[i["primary"]] if i["primary"] >= 0 else "", " ".join(dn[d] for d in i["alternates"])))
+        tree.pack(fill="both", expand=True)
+
+        def apply():
+            opt = {"days": v_days.get(), "primary": v_prim.get(), "breaks": v_brk.get() and have_times, "create": v_new.get()}
+            if not any(opt[k] for k in ("days", "primary", "breaks")):
+                messagebox.showwarning("Εισαγωγή ωρολογίου", "Επιλέξτε τουλάχιστον ένα από τα στοιχεία προς ενημέρωση.", parent=win)
+                return
+            n_applied = sum(1 for _n, t, _i in rows if t is not None or opt["create"])
+            if not messagebox.askyesno("Εισαγωγή ωρολογίου", f"Θα ενημερωθεί η διαθεσιμότητα {n_applied} εκπαιδευτικών (υπάρχουσες τιμές θα αντικατασταθούν).\n"
+                                       "Πριν από την αλλαγή θα παρθεί αυτόματο αντίγραφο ασφαλείας.\n\nΝα συνεχιστεί;", parent=win):
+                return
+            win.destroy()
+            self._apply_timetable(rows, tt, opt)
+        ttk.Button(foot, text="Εφαρμογή", style="Accent.TButton", command=apply).pack(side="right")
+        ttk.Button(foot, text="Άκυρο", command=win.destroy).pack(side="right", padx=8)
+        self._timetable_win = win
+
+    def _apply_timetable(self, rows, tt: dict, opt: dict) -> dict:
+        self.auto_backup("πριν την εισαγωγή ωρολογίου")
+        conn = self.db.conn
+        intervals = self.db.intervals(True)
+        done = created = n_breaks = 0
+        skipped = []
+        _times = [v for v in tt.get("periods", {}).values() if v[0] and v[1]]
+        day_first = min((a for a, _b in _times), default="")
+        day_last = max((b for _a, b in _times), default="")
+        try:
+            for name, t, i in rows:
+                if t is None:
+                    if not opt["create"]:
+                        skipped.append(name)
+                        continue
+                    conn.execute("INSERT OR IGNORE INTO teachers(name) VALUES(?)", (name,))
+                    r = conn.execute("SELECT * FROM teachers WHERE name=?", (name,)).fetchone()
+                    t = Teacher(**dict(r))
+                    created += 1
+                present = set(i["days"])
+                if opt["days"]:
+                    flags = [1 if d in present else 0 for d in range(5)]
+                    conn.execute("UPDATE teachers SET mon=?,tue=?,wed=?,thu=?,fri=? WHERE id=?", (*flags, t.id))
+                if opt["primary"]:
+                    conn.execute("UPDATE teachers SET primary_day=? WHERE id=?", (i["primary"], t.id))
+                    self._set_alternates_nocommit(t.id, i["alternates"])
+                elif opt["days"]:
+                    alts = [d for d in self.db.teacher_alternate_days(t.id, t.alternate_day) if d in present]
+                    self._set_alternates_nocommit(t.id, alts)
+                    if t.primary_day not in present:
+                        conn.execute("UPDATE teachers SET primary_day=-1 WHERE id=?", (t.id,))
+                if opt["breaks"]:
+                    for wd in range(5):
+                        s_e = i["span"].get(wd)
+                        for iv in intervals:
+                            ok = int(bool(wd in present and s_e and s_e[0] and s_e[1] and s_e[0] <= iv["start_time"] and s_e[1] >= iv["end_time"]))
+                            # Προσέλευση / αποχώρηση: εκτός των ωρών μαθημάτων, διαθέσιμος όποιος ξεκινά την πρώτη ώρα της ημέρας
+                            # (προσέλευση) ή τελειώνει την τελευταία (αποχώρηση).
+                            if not ok and wd in present and s_e and day_first and day_last:
+                                if iv["end_time"] <= day_first and s_e[0] == day_first:
+                                    ok = 1
+                                elif iv["start_time"] >= day_last and s_e[1] == day_last:
+                                    ok = 1
+                            conn.execute("INSERT OR REPLACE INTO teacher_interval_availability(teacher_id,weekday,interval_id,available) VALUES(?,?,?,?)", (t.id, wd, iv["id"], ok))
+                            n_breaks += 1
+                done += 1
+            conn.commit()
+        except Exception as exc:
+            conn.rollback()
+            LOG.exception("Εισαγωγή ωρολογίου")
+            messagebox.showerror("Εισαγωγή ωρολογίου", f"Η εισαγωγή απέτυχε και δεν έγινε καμία αλλαγή:\n{exc}")
+            return {}
+        self.refresh_all()
+        res = {"updated": done, "created": created, "skipped": skipped, "break_rows": n_breaks}
+        msg = f"Ενημερώθηκαν {done} εκπαιδευτικοί" + (f" (νέοι: {created})" if created else "") + "."
+        if skipped:
+            msg += f"\n\nΔεν αντιστοιχίστηκαν και δεν άλλαξαν ({len(skipped)}):\n" + "\n".join("• " + s for s in skipped[:15]) + ("\n…" if len(skipped) > 15 else "")
+        msg += "\n\nΕλέγξτε τη διαθεσιμότητα στην καρτέλα «Εκπαιδευτικοί». Για να εφαρμοστεί στο πρόγραμμα, κάντε ανακατανομή."
+        messagebox.showinfo("Εισαγωγή ωρολογίου", msg)
+        return res
+
+    def _set_alternates_nocommit(self, teacher_id: int, weekdays: List[int]) -> None:
+        clean = []
+        for wd in weekdays:
+            if 0 <= int(wd) <= 4 and int(wd) not in clean:
+                clean.append(int(wd))
+        self.db.conn.execute("DELETE FROM teacher_alternate_days WHERE teacher_id=?", (teacher_id,))
+        self.db.conn.executemany("INSERT INTO teacher_alternate_days(teacher_id,priority,weekday) VALUES(?,?,?)", [(teacher_id, k + 1, wd) for k, wd in enumerate(clean)])
+        self.db.conn.execute("UPDATE teachers SET alternate_day=? WHERE id=?", (clean[0] if clean else -1, teacher_id))
+
     def import_teachers_csv(self):
         path = filedialog.askopenfilename(filetypes=[("CSV", "*.csv"), ("All files", "*.*")])
         if not path:
@@ -8278,6 +8454,241 @@ def _xl_col(n: int) -> str:
         n, r = divmod(n - 1, 26)
         s = chr(65 + r) + s
     return s
+
+
+# ======================================================================================
+#  Εισαγωγή ωρολογίου προγράμματος (aSc XML ή xlsx) → διαθεσιμότητα εφημεριών
+# ======================================================================================
+def _plain(text) -> str:
+    import unicodedata
+    n = unicodedata.normalize("NFD", str(text or "").casefold())
+    return "".join(ch for ch in n if not unicodedata.combining(ch)).replace("ς", "σ")
+
+
+def _name_tokens(name: str) -> List[str]:
+    return [t for t in re.split(r"[^0-9a-zα-ω]+", _plain(name)) if t]
+
+
+def match_teacher_name(name: str, teachers: List["Teacher"]) -> Optional["Teacher"]:
+    """Αντιστοίχιση ονόματος ωρολογίου με εκπαιδευτικό της εφαρμογής (χωρίς τόνους, σειρά ονόματος/επωνύμου
+    ανεξάρτητη, αρχικά όπως «Γ.» δεκτά). Επιστρέφει None αν δεν υπάρχει μοναδική αντιστοίχιση."""
+    want = _name_tokens(name)
+    if not want:
+        return None
+    exact = [t for t in teachers if sorted(_name_tokens(t.name)) == sorted(want)]
+    if len(exact) == 1:
+        return exact[0]
+    loose = []
+    for t in teachers:
+        have = _name_tokens(t.name)
+        short, long_ = (want, have) if len(want) <= len(have) else (have, want)
+        if len(short) < 2:
+            continue
+        pool = list(long_)
+        ok = True
+        for s in short:
+            hit = next((p for p in pool if p.startswith(s.rstrip(".")) or s.startswith(p)), None)
+            if hit is None:
+                ok = False
+                break
+            pool.remove(hit)
+        if ok:
+            loose.append(t)
+    return loose[0] if len(loose) == 1 else None
+
+
+def _hhmm(value) -> str:
+    """'8:15', '08.15', 0.34375 (ώρα του Excel) → '08:15'. Κενό αν δεν αναγνωριστεί."""
+    if value is None or str(value).strip() == "":
+        return ""
+    s = str(value).strip()
+    try:
+        f = float(s.replace(",", "."))
+        if 0 <= f < 1:
+            m = int(round(f * 24 * 60))
+            return f"{m // 60:02d}:{m % 60:02d}"
+    except ValueError:
+        pass
+    m = re.match(r"^(\d{1,2})\s*[:.hH]\s*(\d{2})", s)
+    if m and int(m.group(1)) < 24 and int(m.group(2)) < 60:
+        return f"{int(m.group(1)):02d}:{m.group(2)}"
+    return ""
+
+
+def parse_asc_timetable(raw: bytes) -> dict:
+    """aSc Timetables XML (Αρχείο → Εξαγωγή → XML) → {'periods': {αριθμός: (από, έως)}, 'teachers': {όνομα: {ημέρα: [ώρες]}}}."""
+    import xml.etree.ElementTree as ET
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as exc:
+        raise ValueError(f"Το αρχείο δεν είναι έγκυρο XML ({exc}).")
+    if root.tag != "timetable":
+        raise ValueError("Το αρχείο δεν φαίνεται να είναι XML του aSc Timetables (λείπει το στοιχείο «timetable»).")
+
+    def rows(tag: str) -> List[dict]:
+        sec = root.find(tag)
+        return [dict(e.attrib) for e in sec] if sec is not None else []
+    periods = {}
+    for p in rows("periods"):
+        periods[int(p.get("period", "0") or 0)] = (_hhmm(p.get("starttime")), _hhmm(p.get("endtime")))
+    tnames = {}
+    for t in rows("teachers"):
+        name = (t.get("name") or f"{t.get('lastname', '')} {t.get('firstname', '')}").strip()
+        if name:
+            tnames[t["id"]] = name
+    lesson_teachers = {l["id"]: [x for x in (l.get("teacherids") or "").split(",") if x] for l in rows("lessons")}
+    teachers: Dict[str, Dict[int, set]] = {n: {} for n in tnames.values()}
+    cards = rows("cards")
+    if not cards:
+        raise ValueError("Το XML δεν περιέχει τοποθετημένα μαθήματα (cards). Εξάγετε το πρόγραμμα αφού ολοκληρωθεί η τοποθέτηση.")
+    for c in cards:
+        bits = c.get("days", "")
+        if len(bits) != 5 or set(bits) - {"0", "1"}:
+            continue
+        try:
+            per = int(c.get("period", ""))
+        except ValueError:
+            continue
+        for tid in lesson_teachers.get(c.get("lessonid", ""), []):
+            name = tnames.get(tid)
+            if not name:
+                continue
+            for wd, b in enumerate(bits):
+                if b == "1":
+                    teachers[name].setdefault(wd, set()).add(per)
+    return {"source": "aSc", "periods": periods,
+            "teachers": {n: {wd: sorted(ps) for wd, ps in d.items()} for n, d in teachers.items() if d}}
+
+
+def read_xlsx_sheets(raw: bytes) -> Dict[str, List[List[str]]]:
+    """Ελάχιστος αναγνώστης .xlsx (zip + XML): όνομα φύλλου → γραμμές κειμένου."""
+    import xml.etree.ElementTree as ET
+    ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+          "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"}
+    try:
+        z = zipfile.ZipFile(io.BytesIO(raw))
+    except zipfile.BadZipFile:
+        raise ValueError("Το αρχείο δεν είναι έγκυρο .xlsx.")
+    shared: List[str] = []
+    if "xl/sharedStrings.xml" in z.namelist():
+        for si in ET.fromstring(z.read("xl/sharedStrings.xml")).findall("m:si", ns):
+            shared.append("".join(t.text or "" for t in si.iter("{%s}t" % ns["m"])))
+    wb = ET.fromstring(z.read("xl/workbook.xml"))
+    rels = {r.get("Id"): r.get("Target") for r in ET.fromstring(z.read("xl/_rels/workbook.xml.rels"))}
+    out: Dict[str, List[List[str]]] = {}
+    for sh in wb.find("m:sheets", ns):
+        target = rels.get(sh.get("{%s}id" % ns["r"]), "")
+        path = target.lstrip("/") if target.startswith("/") else "xl/" + target
+        if path not in z.namelist():
+            continue
+        grid: Dict[int, Dict[int, str]] = {}
+        for row in ET.fromstring(z.read(path)).iter("{%s}row" % ns["m"]):
+            for c in row.findall("m:c", ns):
+                ref = c.get("r", "")
+                col = 0
+                for ch in re.match(r"[A-Z]+", ref).group(0):
+                    col = col * 26 + ord(ch) - 64
+                t = c.get("t")
+                if t == "s":
+                    v = c.find("m:v", ns)
+                    val = shared[int(v.text)] if v is not None and v.text else ""
+                elif t == "inlineStr":
+                    val = "".join(x.text or "" for x in c.iter("{%s}t" % ns["m"]))
+                else:
+                    v = c.find("m:v", ns)
+                    val = v.text if v is not None and v.text is not None else ""
+                rnum = int(re.search(r"\d+", ref).group(0))
+                grid.setdefault(rnum, {})[col] = val
+        out[sh.get("name", "")] = [[r.get(i, "") for i in range(1, (max(r) if r else 0) + 1)] for _, r in sorted(grid.items())]
+    return out
+
+
+_DAY_KEYS = (("δευ", "mon", "1"), ("τρι", "tue", "2"), ("τετ", "wed", "3"), ("πεμ", "thu", "4"), ("παρ", "fri", "5"))
+
+
+def _day_index(value) -> Optional[int]:
+    s = _plain(value).strip().rstrip(".")
+    if not s:
+        return None
+    for i, keys in enumerate(_DAY_KEYS):
+        if s.startswith(keys[0]) or s.startswith(keys[1]) or s == keys[2]:
+            return i
+    return None
+
+
+def parse_xlsx_timetable(raw: bytes) -> dict:
+    """xlsx με φύλλο «Ωρολόγιο» (στήλες: Εκπαιδευτικός, Ημέρα, Ώρα) και προαιρετικό φύλλο «Ώρες» (Ώρα, Από, Έως)."""
+    sheets = read_xlsx_sheets(raw)
+    main = None
+    times = None
+    for name, rows in sheets.items():
+        head = [_plain(c) for c in (rows[0] if rows else [])]
+        if any(h.startswith("εκπαιδ") or h.startswith("καθηγ") or h.startswith("δασκαλ") for h in head) and any(h.startswith("ημερ") for h in head):
+            main = (name, rows)
+        elif any(h.startswith("ωρα") for h in head) and any(h.startswith("απο") for h in head):
+            times = rows
+    if main is None:
+        raise ValueError("Δεν βρέθηκε φύλλο με στήλες «Εκπαιδευτικός», «Ημέρα», «Ώρα». Χρησιμοποιήστε το πρότυπο από το κουμπί «Πρότυπο xlsx».")
+    head = [_plain(c) for c in main[1][0]]
+    def col(*prefixes):
+        for i, h in enumerate(head):
+            if any(h.startswith(p) for p in prefixes):
+                return i
+        return -1
+    ct, cd, cp = col("εκπαιδ", "καθηγ", "δασκαλ"), col("ημερ"), col("ωρα", "περιοδ")
+    if min(ct, cd, cp) < 0:
+        raise ValueError("Λείπει μία από τις στήλες «Εκπαιδευτικός», «Ημέρα», «Ώρα».")
+    teachers: Dict[str, Dict[int, set]] = {}
+    bad = 0
+    for r in main[1][1:]:
+        r = list(r) + [""] * (max(ct, cd, cp) + 1 - len(r))
+        name = r[ct].strip()
+        if not name and not r[cd].strip():
+            continue
+        wd = _day_index(r[cd])
+        try:
+            per = int(float(str(r[cp]).replace(",", ".")))
+        except ValueError:
+            per = None
+        if not name or wd is None or per is None:
+            bad += 1
+            continue
+        teachers.setdefault(name, {}).setdefault(wd, set()).add(per)
+    if not teachers:
+        raise ValueError("Δεν βρέθηκαν έγκυρες γραμμές ωρολογίου (ελέγξτε ονόματα, ημέρες και αριθμούς ωρών).")
+    periods = {}
+    if times:
+        th = [_plain(c) for c in times[0]]
+        ip = next((i for i, h in enumerate(th) if h.startswith("ωρα")), -1)
+        ia = next((i for i, h in enumerate(th) if h.startswith("απο")), -1)
+        ie = next((i for i, h in enumerate(th) if h.startswith("εως")), -1)
+        for r in times[1:]:
+            try:
+                periods[int(float(r[ip]))] = (_hhmm(r[ia]), _hhmm(r[ie]))
+            except (ValueError, IndexError):
+                continue
+    return {"source": "xlsx", "periods": periods, "bad_rows": bad,
+            "teachers": {n: {wd: sorted(ps) for wd, ps in d.items()} for n, d in teachers.items()}}
+
+
+def analyze_timetable(tt: dict) -> Dict[str, dict]:
+    """Ανά εκπαιδευτικό: ημέρες παρουσίας, ώρες, πρώτη/τελευταία ώρα (με ώρες ρολογιού αν υπάρχουν),
+    και πρόταση κύριας/εναλλακτικών (πρώτα οι ημέρες με τις λιγότερες ώρες διδασκαλίας)."""
+    out = {}
+    per = tt.get("periods", {})
+    for name, days in tt["teachers"].items():
+        present = sorted(days)
+        hours = {wd: len(days[wd]) for wd in present}
+        order = sorted(present, key=lambda wd: (hours[wd], wd))
+        span = {}
+        for wd in present:
+            first, last = min(days[wd]), max(days[wd])
+            s = per.get(first, ("", ""))[0]
+            e = per.get(last, ("", ""))[1]
+            span[wd] = (s, e)
+        out[name] = {"days": present, "hours": hours, "total": sum(hours.values()), "span": span,
+                     "primary": order[0] if order else -1, "alternates": order[1:]}
+    return out
 
 
 def write_xlsx(path, sheets) -> None:
