@@ -14,6 +14,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -90,6 +91,9 @@ class WebUI:
         self.q: "queue.Queue" = queue.Queue()
         self.last_ping = 0.0
         self.bye_at = 0.0
+        self.update_rel: Optional[dict] = None
+        self.dl: Dict[str, Any] = {"state": "idle", "done": 0, "total": 0}
+        self.direct: Dict[str, Callable] = {"/api/update/check": self.api_update_check, "/api/update/install": self.api_update_install, "/api/update/status": self.api_update_status}
         self.started = time.time()
         self.port = 0
         self._server: Optional[ThreadingHTTPServer] = None
@@ -159,6 +163,8 @@ class WebUI:
                     outer.bye_at = time.time()
                     return self._json(200, {"ok": True})
                 try:
+                    if u.path in outer.direct:   # δικτυακές κλήσεις: δεν χρειάζονται το νήμα του Tk
+                        return self._json(200, outer.direct[u.path](params, body))
                     res = outer.run_on_tk(u.path, method, params, body)
                 except ApiError as e:
                     return self._json(e.status, {"error": str(e)})
@@ -180,6 +186,9 @@ class WebUI:
         threading.Thread(target=self._server.serve_forever, daemon=True).start()
         self.app.after(25, self._pump)
         self.app.after(2000, self._watchdog)
+        _t = threading.Timer(6.0, self.auto_check)
+        _t.daemon = True
+        _t.start()
         return f"http://127.0.0.1:{self.port}/?t={self.token}"
 
     def stop(self):
@@ -327,6 +336,8 @@ class WebUI:
             "data_dir": str(self.mod.STORAGE_ROOT),
             "web_start": db.get_setting("ui_mode", "classic") == "web",
             "theme": db.get_setting("ui_theme", "auto"),
+            "update": self.update_info(),
+            "auto_update": self.app._update_state().get("auto", True) is not False,
             "can_undo": bool(app.__dict__.get("_undo_stack")),
         }
 
@@ -579,6 +590,90 @@ class WebUI:
                 out.append(f"<tr><td>{esc(k)}</td><td>{tot[k]}</td></tr>")
             out.append("</table>")
         return ("html", "".join(out))
+
+    # ------------------------------------------------------------ ενημερώσεις
+    def page_open(self) -> bool:
+        """True όταν η νέα διεπαφή είναι αυτή που βλέπει ο χρήστης (οι ειδοποιήσεις ενημέρωσης πάνε εκεί)."""
+        return self.hidden or (self.last_ping and time.time() - self.last_ping < 60)
+
+    def _newer(self, rel: dict) -> bool:
+        return self.app._version_tuple(rel["tag"]) > self.app._version_tuple(self.mod.APP_VERSION)
+
+    def update_info(self) -> Optional[dict]:
+        rel = self.update_rel
+        if not rel or not self._newer(rel) or self.app._update_state().get("skip") == rel["tag"]:
+            return None
+        return {"tag": rel["tag"], "notes": (rel.get("body") or "")[:2500], "url": rel["url"], "can_install": bool(self.app._setup_asset(rel))}
+
+    def api_update_check(self, p, b):
+        app = self.app
+        try:
+            rel = app._fetch_latest_release()
+        except Exception:
+            return {"status": "error"}
+        app._save_update_state(last_check=time.time())
+        if self._newer(rel):
+            self.update_rel = rel
+            return {"status": "newer", "tag": rel["tag"]}
+        self.update_rel = None
+        return {"status": "current", "version": self.mod.APP_VERSION}
+
+    def auto_check(self):
+        if os.environ.get("EFIMERIES_NO_UPDATE_CHECK") or self._quit:
+            return
+        st = self.app._update_state()
+        if st.get("auto", True) is False or time.time() - float(st.get("last_check", 0) or 0) < 24 * 3600:
+            return
+        try:
+            self.api_update_check({}, {})
+        except Exception:
+            pass
+
+    def api_update_install(self, p, b):
+        rel = self.update_rel
+        if not rel:
+            raise ApiError("Δεν υπάρχει διαθέσιμη ενημέρωση")
+        asset = self.app._setup_asset(rel)
+        if not asset:
+            return {"portable": True, "url": rel["url"]}
+        if self.dl.get("state") == "downloading":
+            return {"ok": True}
+        dest = Path(tempfile.gettempdir()) / asset["name"]
+        self.dl = {"state": "downloading", "done": 0, "total": 0, "path": str(dest)}
+
+        def work():
+            try:
+                self.app._download_file(asset["url"], dest, lambda d, t: self.dl.update(done=d, total=t))
+                if asset.get("size") and dest.stat().st_size != int(asset["size"]):
+                    raise OSError("το μέγεθος του αρχείου δεν ταιριάζει")
+                self.dl["state"] = "ready"
+            except Exception as e:  # noqa: BLE001
+                self.dl.update(state="error", msg=str(e))
+        threading.Thread(target=work, daemon=True).start()
+        return {"ok": True}
+
+    def api_update_status(self, p, b):
+        return {k: v for k, v in self.dl.items() if k != "path"}
+
+    def api_update_launch(self, p, b):
+        if self.dl.get("state") != "ready":
+            raise ApiError("Η λήψη δεν έχει ολοκληρωθεί")
+        try:
+            subprocess.Popen([self.dl["path"], "/SILENT", "/NORESTART", "/CLOSEAPPLICATIONS", "/LAUNCH=1"], close_fds=True)
+        except Exception as e:  # noqa: BLE001
+            raise ApiError(f"Δεν ήταν δυνατή η εκκίνηση της εγκατάστασης: {e}")
+        self._quit = True
+        self.app.after(400, self.app._on_close)
+        return {"ok": True}
+
+    def api_update_skip(self, p, b):
+        if self.update_rel:
+            self.app._save_update_state(skip=self.update_rel["tag"])
+        return {"ok": True}
+
+    def api_update_auto(self, p, b):
+        self.app._save_update_state(auto=bool(b.get("auto")))
+        return {"ok": True}
 
     # ---------------------------------------------------------------- λοιπά
     def api_classic(self, p, b):

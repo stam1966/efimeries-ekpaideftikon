@@ -38,7 +38,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 
 APP_TITLE = "Εφημερίες Εκπαιδευτικών"
-APP_VERSION = "0.60.1"
+APP_VERSION = "0.61"
 UPDATE_REPO = "stam1966/efimeries-ekpaideftikon"  # αποθετήριο GitHub από όπου ελέγχονται οι νέες εκδόσεις
 
 # Όρια εργασίας του εβδομαδιαίου σχεδιασμού (προστατεύουν από πολύ αργούς υπολογισμούς σε μεγάλα σχολεία).
@@ -2695,6 +2695,10 @@ class EfimeriesApp(tk.Tk):
                 messagebox.showinfo("Έλεγχος έκδοσης", f"Έχετε την τελευταία έκδοση (v{APP_VERSION}).")
             return
         if not manual and self._update_state().get("skip") == rel["tag"]:
+            return
+        ui = self.__dict__.get("_webui")
+        if ui is not None and ui.page_open():
+            ui.update_rel = rel   # η ειδοποίηση εμφανίζεται στη νέα διεπαφή, όχι σε (κρυφό) παράθυρο Tk
             return
         self._show_update_dialog(rel)
 

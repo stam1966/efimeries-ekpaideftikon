@@ -124,6 +124,8 @@ pre.out{white-space:pre-wrap;background:var(--panel2);border:1px solid var(--lin
 .empty{color:var(--muted);padding:18px;text-align:center}
 details>summary{cursor:pointer;font-weight:600;color:var(--muted)}
 .hide{display:none!important}
+.upd{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 16px;border-radius:12px;background:var(--accent-soft);color:var(--accent);margin-bottom:14px;font-weight:600}
+.bar{height:8px;border-radius:99px;background:var(--line);overflow:hidden;min-width:180px;flex:1}.bar i{display:block;height:100%;background:var(--accent);width:0;transition:width .2s}
 @media (max-width:860px){.app{grid-template-columns:1fr}.side{flex-direction:row;overflow:auto;padding:8px;border-right:0;border-bottom:1px solid var(--line)}.brand,.side .foot{display:none}.nav{flex-direction:row}.main{padding:18px 14px 60px}}
 </style>
 </head>
@@ -179,13 +181,30 @@ async function route(){
   closeDrawer();
   const v=$("#view");v.replaceChildren(h("div",{class:"empty"},"Φόρτωση…"));
   try{S=await api("/api/state");if(S.theme!==THEME){THEME=S.theme||"auto";applyTheme()}$("#bSchool").textContent=S.school;$("#bYear").textContent="Σχολικό έτος "+S.year;$("#bVer").textContent="v"+S.version+" · "+S.arch;
-    v.replaceChildren();await PAGE[cur](v)}catch(e){v.replaceChildren(h("div",{class:"alert bad"},"⚠ "+e.message))}
+    v.replaceChildren();if(S.update)v.append(updBanner());await PAGE[cur](v)}catch(e){v.replaceChildren(h("div",{class:"alert bad"},"⚠ "+e.message))}
 }
 /* ---------------- Συρτάρι ---------------- */
 function openDrawer(title,sub,body,foot){$("#dTitle").textContent=title;$("#dSub").textContent=sub||"";$("#dBody").replaceChildren(...[].concat(body));$("#dFoot").replaceChildren(...[].concat(foot||[]));$("#drawer").classList.add("open");$("#bg").style.display="block"}
 function closeDrawer(){$("#drawer").classList.remove("open");$("#bg").style.display="none"}
 $("#bg").onclick=closeDrawer;$("#dClose").onclick=closeDrawer;
 addEventListener("keydown",e=>{if(e.key==="Escape")closeDrawer()});
+/* ---------------- Ενημερώσεις ---------------- */
+function updBanner(){
+  const u=S.update,box=h("div",{class:"upd"}),txt=h("span",{},"Διαθέσιμη νέα έκδοση "+u.tag+" (έχετε την v"+S.version+")");box.append(txt);
+  const bar=h("div",{class:"bar hide"},h("i")),info=h("small",{class:"hide"});
+  const notes=h("button",{class:"btn sm",onclick:()=>openDrawer("Τι νέο υπάρχει στην "+u.tag,"Τα δεδομένα σας δεν επηρεάζονται.",h("pre",{class:"out"},u.notes||"Δεν υπάρχουν σημειώσεις έκδοσης."),h("button",{class:"btn",onclick:closeDrawer},"Κλείσιμο"))},"Τι νέο υπάρχει");
+  const inst=h("button",{class:"btn pri sm",onclick:()=>guard(async()=>{
+    if(!u.can_install){window.open(u.url,"_blank");return}
+    if(!confirm("Η εφαρμογή θα κλείσει για να εγκατασταθεί η "+u.tag+" και θα ανοίξει ξανά μόνη της. Τα δεδομένα σας δεν επηρεάζονται. Να συνεχίσω;"))return;
+    await api("/api/update/install",{});[inst,notes,later].forEach(x=>x.classList.add("hide"));bar.classList.remove("hide");info.classList.remove("hide");txt.textContent="Λήψη της "+u.tag+"…";
+    for(;;){await new Promise(r=>setTimeout(r,450));const s=await api("/api/update/status");
+      if(s.total){bar.firstChild.style.width=(100*s.done/s.total)+"%";info.textContent=(s.done/1048576).toFixed(1)+" / "+(s.total/1048576).toFixed(1)+" MB"}
+      if(s.state==="error")throw new Error("Η λήψη απέτυχε. Δοκιμάστε ξανά αργότερα.");
+      if(s.state==="ready"){await api("/api/update/launch",{});document.body.innerHTML='<div style="padding:60px;text-align:center;font:16px system-ui">Γίνεται εγκατάσταση της νέας έκδοσης…<br>Η εφαρμογή θα ανοίξει ξανά σε λίγα δευτερόλεπτα. Μπορείτε να κλείσετε αυτό το παράθυρο.</div>';return}}
+  },inst)},u.can_install?"Λήψη και εγκατάσταση τώρα":"Άνοιγμα σελίδας λήψης");
+  const later=h("button",{class:"btn sm",onclick:()=>box.remove()},"Αργότερα");
+  const skip=h("button",{class:"btn sm",onclick:()=>guard(async()=>{await api("/api/update/skip",{});box.remove()})},"Όχι για αυτή την έκδοση");
+  box.append(bar,info,inst,notes,later,skip);return box}
 /* ---------------- Αρχική ---------------- */
 const PAGE={};
 PAGE.home=async v=>{
@@ -397,6 +416,14 @@ PAGE.more=async v=>{
   lbl.append(cbx,"Εκκίνηση της εφαρμογής με τη νέα διεπαφή");
   v.append(h("div",{class:"card",style:"margin-top:16px"},h("h2",{},"Εμφάνιση και εκκίνηση"),lbl,
     h("div",{class:"row",style:"margin-top:12px"},h("span",{class:"m",style:"color:var(--muted)"},"Θέμα:"),h("div",{class:"seg"},[["auto","Αυτόματο"],["light","Φωτεινό"],["dark","Σκούρο"]].map(([k,l])=>h("button",{class:themeNow()===k?"on":"",onclick:async()=>{await setTheme(k);route()}},l))))));
+  const ust=h("span",{class:"m",style:"color:var(--muted)"},"");
+  const ubtn=h("button",{class:"btn",onclick:()=>guard(async()=>{ust.textContent="Έλεγχος…";const r=await api("/api/update/check",{});
+    if(r.status==="error")ust.textContent="Δεν ήταν δυνατός ο έλεγχος. Ελέγξτε τη σύνδεση στο Internet.";
+    else if(r.status==="current")ust.textContent="✔ Έχετε την τελευταία έκδοση (v"+r.version+").";
+    else{ust.textContent="Βρέθηκε η "+r.tag+".";route()}},ubtn)},"Έλεγχος για νέα έκδοση");
+  const acb=h("input",{type:"checkbox",onchange:e=>guard(async()=>{await api("/api/update/auto",{auto:e.target.checked})})});acb.checked=S.auto_update;
+  v.append(h("div",{class:"card",style:"margin-top:16px"},h("h2",{},"Ενημερώσεις"),
+    h("div",{class:"row"},ubtn,ust),h("label",{class:"row",style:"cursor:pointer;margin-top:10px"},acb,"Αυτόματος έλεγχος για νέα έκδοση στην εκκίνηση (το πολύ μία φορά το 24ωρο)")));
   v.append(h("div",{class:"card",style:"margin-top:16px"},h("h2",{},"Πληροφορίες"),h("p",{class:"m",style:"margin:0;color:var(--muted)"},`Έκδοση v${S.version} (${S.arch}) · Φάκελος δεδομένων: ${S.data_dir}`),
     h("div",{class:"row",style:"margin-top:12px"},h("button",{class:"btn danger",onclick:()=>{if(confirm("Να κλείσει η εφαρμογή;"))api("/api/quit",{}).then(()=>{document.body.innerHTML='<div style="padding:60px;text-align:center;font:16px system-ui">Η εφαρμογή έκλεισε. Μπορείτε να κλείσετε αυτό το παράθυρο.</div>'}).catch(()=>{})}},"Έξοδος από την εφαρμογή"))));
 };
