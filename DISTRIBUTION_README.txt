@@ -10,5 +10,10 @@ EFIMERIES PORTABLE v0.48 - ΤΕΛΙΚΗ ΔΙΑΝΟΜΗ
    Κοκολόγος Σταμάτης, ΠΕ70
    https://github.com/stam1966/efimeries-ekpaideftikon/issues
 
+Τελευταία έκδοση (μόνιμος σύνδεσμος, ίδιος για κάθε έκδοση):
+   https://github.com/stam1966/efimeries-ekpaideftikon/releases/latest
+   Setup 64-bit: https://github.com/stam1966/efimeries-ekpaideftikon/releases/latest/download/Efimeries_Setup_x64.exe
+   Setup 32-bit: https://github.com/stam1966/efimeries-ekpaideftikon/releases/latest/download/Efimeries_Setup_x86.exe
+
 Σημείωση προστασίας:
 Το πακέτο διανομής δεν περιλαμβάνει πηγαίο κώδικα Python ή build scripts.

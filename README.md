@@ -3,6 +3,11 @@
 Εφαρμογή Windows (Python / Tkinter / SQLite) για δημιουργία και διαχείριση προγράμματος εφημεριών εκπαιδευτικών.
 
 ## Λήψη
+**Μόνιμοι σύνδεσμοι (δείχνουν πάντα στην τελευταία έκδοση, δεν αλλάζουν ποτέ):**
+- [Setup 64-bit](https://github.com/stam1966/efimeries-ekpaideftikon/releases/latest/download/Efimeries_Setup_x64.exe) (οι περισσότεροι υπολογιστές)
+- [Setup 32-bit](https://github.com/stam1966/efimeries-ekpaideftikon/releases/latest/download/Efimeries_Setup_x86.exe)
+- [Portable zip](https://github.com/stam1966/efimeries-ekpaideftikon/releases/latest/download/EfimeriesPortable_Portable.zip)
+
 Από τη σελίδα **[Releases](https://github.com/stam1966/efimeries-ekpaideftikon/releases/latest)**:
 - `Efimeries_Setup_v…_x64.exe`: εγκατάσταση για 64-bit Windows (οι περισσότεροι υπολογιστές).
 - `Efimeries_Setup_v…_x86.exe`: εγκατάσταση για 32-bit Windows.

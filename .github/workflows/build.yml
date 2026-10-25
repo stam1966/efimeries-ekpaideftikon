@@ -139,6 +139,12 @@ jobs:
           Copy-Item Odigos_Chrisis_Efimeries.pdf "$rel/Odigos_Chrisis_Efimeries.pdf"
           Copy-Item DISTRIBUTION_README.txt "$rel/README.txt"
           Compress-Archive -Path "$rel/*" -DestinationPath "release/EfimeriesPortable_v${u}_Portable.zip" -Force
+          # Αντίγραφα με ΣΤΑΘΕΡΟ όνομα (χωρίς έκδοση) για μόνιμους συνδέσμους λήψης
+          foreach ($a in 'x64','x86') {
+            $f = Get-ChildItem release/setups/Efimeries_Setup_v*_$a.exe | Select-Object -First 1
+            Copy-Item $f.FullName "release/setups/Efimeries_Setup_$a.exe"
+          }
+          Copy-Item "release/EfimeriesPortable_v${u}_Portable.zip" "release/EfimeriesPortable_Portable.zip"
           Get-ChildItem release -Recurse -File | Where-Object { $_.Extension -in '.exe','.zip' } | ForEach-Object { Write-Host $_.FullName }
 
       - uses: actions/upload-artifact@v4
