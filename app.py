@@ -38,7 +38,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 
 APP_TITLE = "Εφημερίες Εκπαιδευτικών"
-APP_VERSION = "0.66"
+APP_VERSION = "0.67"
 UPDATE_REPO = "stam1966/efimeries-ekpaideftikon"  # αποθετήριο GitHub από όπου ελέγχονται οι νέες εκδόσεις
 
 # Όρια εργασίας του εβδομαδιαίου σχεδιασμού (προστατεύουν από πολύ αργούς υπολογισμούς σε μεγάλα σχολεία).
@@ -9121,6 +9121,87 @@ def write_xlsx(path, sheets) -> None:
         z.writestr("xl/styles.xml", styles)
         for i, x in enumerate(sheet_xml, 1):
             z.writestr(f"xl/worksheets/sheet{i}.xml", x)
+    os.replace(tmp, path)
+
+
+def write_xlsx_grid(path, title: str, weeks, sheet_name: str = "Πρόγραμμα") -> None:
+    """Εβδομαδιαίο πλέγμα (όπως το χειροποίητο Excel του σχολείου): ανά εβδομάδα γραμμή ημερομηνιών, γραμμή ημερών
+    και μία γραμμή ανά τομέα. weeks = [{"dates":[5 κείμενα], "days":[5 κείμενα], "rows":[(ετικέτα,[5 κείμενα],[5 bool σημείωσης])]}]."""
+    from xml.sax.saxutils import escape
+    bad = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f]")
+    t = lambda v: escape(bad.sub("", str(v)))
+    out = []
+    merges = []
+    r = 1
+    out.append(f'<row r="1" ht="26" customHeight="1"><c r="A1" s="1" t="inlineStr"><is><t xml:space="preserve">{t(title)}</t></is></c></row>')
+    merges.append("A1:F1")
+    r = 2
+    breaks = []
+    def cell(col, row, text, style):
+        if text == "" or text is None:
+            return f'<c r="{_xl_col(col)}{row}" s="{style}"/>'
+        return f'<c r="{_xl_col(col)}{row}" s="{style}" t="inlineStr"><is><t xml:space="preserve">{t(text)}</t></is></c>'
+    for wi, wk in enumerate(weeks):
+        r += 1  # κενή γραμμή πριν από κάθε εβδομάδα
+        if wi and wi % 4 == 0:
+            breaks.append(r - 1)
+        out.append(f'<row r="{r}">' + cell(0, r, "", 2) + "".join(cell(i + 1, r, wk["dates"][i], 2) for i in range(5)) + "</row>")
+        r += 1
+        out.append(f'<row r="{r}">' + cell(0, r, "", 3) + "".join(cell(i + 1, r, wk["days"][i], 3) for i in range(5)) + "</row>")
+        for label, vals, notes in wk["rows"]:
+            r += 1
+            out.append(f'<row r="{r}" ht="20" customHeight="1">' + cell(0, r, label, 4) + "".join(cell(i + 1, r, vals[i], 6 if notes[i] else 5) for i in range(5)) + "</row>")
+    last = r
+    sheet = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>'
+        '<sheetViews><sheetView workbookViewId="0" tabSelected="1" showGridLines="0"/></sheetViews><sheetFormatPr defaultRowHeight="15"/>'
+        '<cols><col min="1" max="1" width="18" customWidth="1"/><col min="2" max="6" width="24" customWidth="1"/></cols>'
+        '<sheetData>' + "".join(out) + '</sheetData>'
+        + f'<mergeCells count="{len(merges)}">' + "".join(f'<mergeCell ref="{m}"/>' for m in merges) + '</mergeCells>'
+        + '<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.3" footer="0.3"/>'
+        '<pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/>'
+        + (f'<rowBreaks count="{len(breaks)}" manualBreakCount="{len(breaks)}">' + "".join(f'<brk id="{b}" max="16383" man="1"/>' for b in breaks) + '</rowBreaks>' if breaks else '')
+        + '</worksheet>')
+    content_types = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>')
+    rels = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')
+    wb = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'
+        f'<sheet name="{escape(sheet_name[:31])}" sheetId="1" r:id="rId1"/></sheets></workbook>')
+    wb_rels = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+        '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>')
+    thin = '<border><left style="thin"><color rgb="FF808080"/></left><right style="thin"><color rgb="FF808080"/></right><top style="thin"><color rgb="FF808080"/></top><bottom style="thin"><color rgb="FF808080"/></bottom><diagonal/></border>'
+    styles = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        '<fonts count="4"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="16"/><name val="Calibri"/></font>'
+        '<font><b/><sz val="11"/><name val="Calibri"/></font><font><i/><sz val="10"/><color rgb="FF7A5A00"/><name val="Calibri"/></font></fonts>'
+        '<fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
+        '<fill><patternFill patternType="solid"><fgColor rgb="FFD9D9D9"/><bgColor indexed="64"/></patternFill></fill>'
+        '<fill><patternFill patternType="solid"><fgColor rgb="FFFFF2CC"/><bgColor indexed="64"/></patternFill></fill></fills>'
+        f'<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>{thin}</borders>'
+        '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+        '<cellXfs count="7"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+        '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"><alignment vertical="center"/></xf>'
+        '<xf numFmtId="0" fontId="2" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center"/></xf>'
+        '<xf numFmtId="0" fontId="2" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center"/></xf>'
+        '<xf numFmtId="0" fontId="2" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>'
+        '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>'
+        '<xf numFmtId="0" fontId="3" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf></cellXfs>'
+        '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>')
+    path = Path(path)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", content_types)
+        z.writestr("_rels/.rels", rels)
+        z.writestr("xl/workbook.xml", wb)
+        z.writestr("xl/_rels/workbook.xml.rels", wb_rels)
+        z.writestr("xl/styles.xml", styles)
+        z.writestr("xl/worksheets/sheet1.xml", sheet)
     os.replace(tmp, path)
 
 

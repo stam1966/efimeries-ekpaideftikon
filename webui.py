@@ -580,6 +580,61 @@ class WebUI:
         args = (a.isoformat(), z.isoformat()) + ((tid,) if tid else ())
         return self.db.conn.execute(sql, args).fetchall()
 
+    def _grid_weeks(self, a: date, z: date) -> list:
+        """Εβδομαδιαίο πλέγμα: κάθε εβδομάδα έχει ημερομηνίες/ημέρες και μία γραμμή ανά τομέα (ή ανά ζώνη+τομέα στους τρόπους διαλειμμάτων/βαρδιών)."""
+        m = self.mod
+        rows = self._duty_rows(a, z)
+        areas = [r["name"] for r in self.db.areas(True)]
+        aidx = {n: i for i, n in enumerate(areas)}
+        interval_mode = any(r["mode"] != "daily" for r in rows)
+        labels: Dict[str, tuple] = {}
+        cells: Dict[tuple, list] = {}
+        for r in rows:
+            area = r["display_area"]
+            if interval_mode:
+                lab = f"{r['interval_name']} · {area}"
+                key = (r["start_time"] or "", aidx.get(area, 99))
+            else:
+                lab = area
+                key = (aidx.get(area, 99), 0)
+            labels.setdefault(lab, key)
+            lst = cells.setdefault((lab, r["d"]), [])
+            if r["teacher"] not in lst:
+                lst.append(r["teacher"])
+        if not interval_mode:
+            for n in areas:
+                labels.setdefault(n, (aidx[n], 0))
+        order = sorted(labels, key=lambda k: (labels[k], k))
+        weeks = []
+        mon = a - timedelta(days=a.weekday())
+        while mon <= z:
+            days = [mon + timedelta(days=i) for i in range(5)]
+            if any(a <= d <= z for d in days):
+                wk = {"dates": [m.fmt_date(d.isoformat()) for d in days], "days": list(m.DAYS_GR), "rows": []}
+                notes = []
+                for d in days:
+                    txt = ""
+                    if a <= d <= z and not any((lab, d.isoformat()) in cells for lab in order):
+                        try:
+                            css, t = self.app._print_day_note(d)
+                            txt = t if css == "off-day" else ""
+                        except Exception:
+                            txt = ""
+                    notes.append(txt)
+                for k, lab in enumerate(order):
+                    vals, flags = [], []
+                    for i, d in enumerate(days):
+                        if notes[i]:
+                            vals.append(notes[i] if k == 0 else "")
+                            flags.append(True)
+                        else:
+                            vals.append(" / ".join(cells.get((lab, d.isoformat()), [])))
+                            flags.append(False)
+                    wk["rows"].append((lab, vals, flags))
+                weeks.append(wk)
+            mon += timedelta(days=7)
+        return weeks
+
     def _who_ids(self, who: str) -> List[int]:
         if who.startswith("teacher:"):
             return [int(who.split(":", 1)[1])]
@@ -611,7 +666,19 @@ class WebUI:
                       + (f"<td>{esc(r['teacher'])}</td>" if show_teacher else "") + f"<td>{'✔' if int(r['locked'] or 0) else ''}</td></tr>")
                 last = r["d"]
             return h + "</table>"
-        if who == "all":
+        if who == "all" and p.get("fmt", "grid") == "grid":
+            weeks = self._grid_weeks(a, z)
+            out[1] = out[1].replace("</style>", ".wk{page-break-inside:avoid;margin-bottom:14px}.wk table{table-layout:fixed}.wk th{text-align:center;background:#d9d9d9}.wk td{text-align:center;height:24px}"
+                                    ".wk td.l{text-align:left;font-weight:700;width:13%}.wk td.n{background:#fff2cc;font-style:italic;color:#7a5a00;font-size:11px}.wk th.e{background:#fff}"
+                                    "@media print{@page{size:A4 landscape;margin:8mm}.wk{margin-bottom:10px}}</style>")
+            out.append(f"<h1>{school}</h1><p style='font-size:15px;color:#111'><b>Πρόγραμμα Εφημεριών από {fmt(a.isoformat())} έως {fmt(z.isoformat())}</b></p>")
+            for wk in weeks:
+                t = "<div class='wk'><table><tr><th class='e'></th>" + "".join(f"<th>{esc(d)}</th>" for d in wk["dates"]) + "</tr>"
+                t += "<tr><th class='e'></th>" + "".join(f"<th>{esc(d)}</th>" for d in wk["days"]) + "</tr>"
+                for lab, vals, flags in wk["rows"]:
+                    t += f"<tr><td class='l'>{esc(lab)}</td>" + "".join(f"<td{' class=n' if f else ''}>{esc(v)}</td>" for v, f in zip(vals, flags)) + "</tr>"
+                out.append(t + "</table></div>")
+        elif who == "all":
             rows = self._duty_rows(a, z)
             out.append(f"<h1>{school}</h1><p>Εφημερίες {period}</p>" + table(rows, True))
             tot: Dict[str, int] = {}
@@ -998,6 +1065,19 @@ class WebUI:
                 raise ApiError("Δεν υπάρχει πρόγραμμα για εξαγωγή. Δημιούργησε πρώτα πρόγραμμα.")
             data = path.read_bytes()
         return ("file", f"efimeries_{year}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx", data,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    def api_xlsx_grid(self, p, b):
+        m = self.mod
+        a, z = self._d(p.get("from", "")), self._d(p.get("to", ""))
+        weeks = self._grid_weeks(a, z)
+        if not any(v for wk in weeks for _l, vals, fl in wk["rows"] for v, f in zip(vals, fl) if v and not f):
+            raise ApiError("Δεν υπάρχουν εφημερίες στο διάστημα.")
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "g.xlsx"
+            m.write_xlsx_grid(path, f"Πρόγραμμα Εφημεριών από: {m.fmt_date(a.isoformat())} έως {m.fmt_date(z.isoformat())}", weeks)
+            data = path.read_bytes()
+        return ("file", f"Programma_Efimerion_{a.isoformat()}_{z.isoformat()}.xlsx", data,
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     def _csv_bytes(self, headers, rows) -> bytes:
