@@ -38,7 +38,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 
 APP_TITLE = "Εφημερίες Εκπαιδευτικών"
-APP_VERSION = "0.67"
+APP_VERSION = "0.67.1"
 UPDATE_REPO = "stam1966/efimeries-ekpaideftikon"  # αποθετήριο GitHub από όπου ελέγχονται οι νέες εκδόσεις
 
 # Όρια εργασίας του εβδομαδιαίου σχεδιασμού (προστατεύουν από πολύ αργούς υπολογισμούς σε μεγάλα σχολεία).
@@ -961,6 +961,14 @@ class EfimeriesApp(tk.Tk):
             return
         self.active_school_year = prepare_year_storage()
         self.db = DB(year_db_path(self.active_school_year), self.active_school_year)
+        # Εκκίνηση με τη νέα διεπαφή: το κλασικό παράθυρο δεν πρέπει να εμφανιστεί καθόλου (ούτε για λίγο).
+        self._start_hidden = False
+        try:
+            if "--web" in sys.argv or self.db.get_setting("ui_mode", "classic") == "web":
+                self.withdraw()
+                self._start_hidden = True
+        except Exception:
+            pass
         self._update_window_title()
         try:
             self.iconbitmap(str(resource_path("app_icon.ico")))
@@ -1279,7 +1287,10 @@ class EfimeriesApp(tk.Tk):
             y = max(0, min(int(st["y"]), sh - 120))
             self.geometry(f"{w}x{h}+{x}+{y}")
             if st.get("zoomed"):
-                self.state("zoomed")
+                if getattr(self, "_start_hidden", False):
+                    self._want_zoomed = True   # θα εφαρμοστεί όταν εμφανιστεί το κλασικό παράθυρο
+                else:
+                    self.state("zoomed")
         except Exception:
             pass
 

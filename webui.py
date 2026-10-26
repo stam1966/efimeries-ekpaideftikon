@@ -277,6 +277,9 @@ class WebUI:
         self.hidden = False
         try:
             app.deiconify()
+            if getattr(app, "_want_zoomed", False):
+                app._want_zoomed = False
+                app.state("zoomed")
             app.lift()
             app.focus_force()
         except Exception:
