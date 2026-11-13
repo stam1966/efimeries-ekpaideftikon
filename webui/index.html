@@ -213,6 +213,9 @@ PAGE.home=async v=>{
   const todayRows=S.upcoming.filter(r=>r.d===S.today);
   v.append(h("h1",{},"Καλώς ήρθατε"),h("p",{class:"sub"},longDate(S.today)+" · "+S.school));
   S.attention.forEach(a=>v.append(h("div",{class:"alert"},"⚠ "+a.text,h("a",{onclick:()=>go(a.go)},"Άνοιγμα →"))));
+  try{const O=await api("/api/orologio/status");
+    if(O.available&&O.new)v.append(h("div",{class:"alert"},"📅 Νέο πρόγραμμα από το «Ωρολόγιο Σχολείου» ("+O.updated+"). Ενημερώστε τους εκπαιδευτικούς — η παραγωγή αλλάζει μόνο αν το επιλέξετε.",h("a",{onclick:()=>{ST.tab="timetable";ORO=true;go("settings")}},"Ενημέρωση →")));
+    if(O.absences.length)v.append(h("div",{class:"alert"},"🗓 "+O.absences.length+(O.absences.length===1?" απουσία":" απουσίες")+" από τις Αναπληρώσεις του «Ωρολογίου Σχολείου» δεν έχουν περάσει ακόμη στις εφημερίες.",h("a",{onclick:()=>go("absences")},"Εισαγωγή →")))}catch(e){}
   if(!S.attention.length&&S.assignments>0)v.append(h("div",{class:"alert ok"},"✔ Όλα εντάξει: δεν υπάρχουν σημεία που χρειάζονται προσοχή."));
   v.append(h("div",{class:"grid g4",style:"margin-bottom:16px"},
     stat(S.teachers,"εκπαιδευτικοί στον κύκλο"),stat(S.assignments,"εφημερίες στο πρόγραμμα"),stat(MODES[S.mode]||S.mode,"τρόπος εφημερίας"),
@@ -352,7 +355,20 @@ PAGE.absences=async v=>{
     h("div",{class:"row",style:"margin-top:14px"},h("label",{class:"row",style:"cursor:pointer"},rep,"Βρες αυτόματα αντικαταστάτες για τις εφημερίες της περιόδου"),h("div",{class:"sp"}),btn)));
   const c=h("div",{class:"card",style:"padding:6px 10px"},absences.length?h("table",{},h("thead",{},h("tr",{},["Εκπαιδευτικός","Από","Έως","Λόγος",""].map(x=>h("th",{},x)))),h("tbody",{},...absences.slice().reverse().map(a=>h("tr",{},h("td",{},h("b",{},a.teacher)),h("td",{},fmt(a.from)),h("td",{},fmt(a.to)),h("td",{},a.reason),
     h("td",{style:"text-align:right"},h("button",{class:"btn sm danger",onclick:()=>{if(confirm("Διαγραφή της απουσίας; (Οι εφημερίες που έχουν ήδη αλλάξει δεν επανέρχονται· μπορείς να χρησιμοποιήσεις «Αναίρεση» στην Αρχική.)"))guard(async()=>{await api("/api/absence/delete",{id:a.id});route()})}},"Διαγραφή")))))):h("div",{class:"empty"},"Δεν υπάρχουν καταχωρημένες απουσίες."));
-  v.append(c)};
+  v.append(c);
+  let OS=null;try{OS=await api("/api/orologio/status")}catch(e){}
+  if(OS&&OS.absences.length){
+    const sel={},tsel={};const dn=a=>fmt(a.from)+(a.to!==a.from?" – "+fmt(a.to):"");
+    const rows=OS.absences.map(a=>{const cb=h("input",{type:"checkbox",onchange:e=>sel[a.key]=e.target.checked});cb.checked=sel[a.key]=a.full&&!!a.teacher_id;
+      const ts=h("select",{onchange:e=>tsel[a.key]=e.target.value},h("option",{value:""},"— εκπαιδευτικός —"),...teachers.filter(t=>t.active).map(t=>h("option",{value:t.id},t.name)));ts.value=a.teacher_id||"";
+      return h("tr",{},h("td",{},cb),h("td",{},h("b",{},a.name)),h("td",{},ts),h("td",{},dn(a)),h("td",{},a.full?"όλη την ημέρα":"ώρες "+(a.periods||[]).join(", ")),h("td",{},a.reason||""))});
+    const go2=(imp)=>guard(async()=>{const keys=Object.keys(sel).filter(k=>sel[k]);if(!keys.length)throw new Error("Επιλέξτε τουλάχιστον μία απουσία");
+      const r=await api("/api/orologio/absences/import",imp?{keys,teachers:tsel,replace:true}:{skip:keys});
+      toast(imp?"Καταχωρήθηκαν "+r.imported+" απουσίες · αντικαταστάθηκαν "+r.replaced+" εφημερίες"+(r.missing.length?" · χωρίς εκπαιδευτικό: "+r.missing.join(", "):""):"Οι επιλεγμένες δεν θα ξαναεμφανιστούν",8000);route()});
+    v.append(h("div",{class:"card",style:"margin-top:16px"},h("h2",{},"Από τις Αναπληρώσεις του «Ωρολογίου Σχολείου»"),
+      h("p",{class:"m",style:"color:var(--muted)"},"Απουσίες που δηλώθηκαν στο Ωρολόγιο και δεν υπάρχουν ακόμη εδώ. Οι απουσίες για λίγες ώρες δεν επιλέγονται αυτόματα· επιλέξτε τες αν η εφημερία πέφτει μέσα σε αυτές."),
+      h("div",{style:"overflow:auto"},h("table",{},h("thead",{},h("tr",{},["","Όνομα στο Ωρολόγιο","Εκπαιδευτικός","Ημερομηνίες","Διάρκεια","Λόγος"].map(x=>h("th",{},x)))),h("tbody",{},...rows))),
+      h("div",{class:"row",style:"margin-top:12px"},h("button",{class:"btn pri",onclick:()=>go2(true)},"Καταχώρηση επιλεγμένων (με αντικαταστάτες)"),h("button",{class:"btn",onclick:()=>go2(false)},"Παράβλεψη επιλεγμένων"))))}};
 /* ---------------- Παραγωγή ---------------- */
 PAGE.generate=async v=>{
   const g=await api("/api/generate/settings");
@@ -501,9 +517,17 @@ TAB.year=async v=>{
     h("div",{class:"row",style:"margin-top:16px"},h("button",{class:"btn pri",id:"ny-go",onclick:e=>guard(async()=>{
       await api("/api/year/create",{year:sel.value,start:a.value,end:z.value,copy:C});S=null;toast("Δημιουργήθηκε και άνοιξε το "+sel.value,6000);route()},e.currentTarget)},"Δημιουργία και άνοιγμα"))))};
 /* ---------------- Ωρολόγιο ---------------- */
-let TT=null;
+let TT=null,ORO=false;
 TAB.timetable=async v=>{
   const box=h("div");
+  let OS=null;try{OS=await api("/api/orologio/status")}catch(e){}
+  const fromOro=()=>guard(async()=>{TT=await api("/api/orologio/preview",{});drawTT()});
+  if(OS&&OS.available)v.append(h("div",{class:"card",style:"margin-bottom:16px"},h("h2",{},"Από το «Ωρολόγιο Σχολείου»"),
+    h("p",{class:"m",style:"color:var(--muted)"},"Πρόγραμμα του "+(OS.school||"σχολείου")+(OS.year?" ("+OS.year+")":"")+" · "+OS.count+" εκπαιδευτικοί · τελευταία αλλαγή "+OS.updated+(OS.new?" · νέο, δεν έχει περάσει εδώ":" · έχει ήδη περάσει")+"."),
+    h("p",{class:"m",style:"color:var(--muted)"},"Πριν από κάθε ενημέρωση βλέπετε προεπισκόπηση. Ο τρόπος παραγωγής των εφημεριών αλλάζει μόνο αν επιλέξετε να ληφθεί υπόψη το ωρολόγιο."),
+    h("div",{class:"row"},h("button",{class:"btn pri",id:"tt-oro",onclick:fromOro},"Ενημέρωση από το Ωρολόγιο…"))));
+  else v.append(h("p",{class:"m",style:"color:var(--muted)"},"Αν χρησιμοποιείτε και το «Ωρολόγιο Σχολείου» στον ίδιο υπολογιστή ή σε κοινό φάκελο, το πρόγραμμα έρχεται από εκεί χωρίς αρχείο."));
+  if(ORO){ORO=false;if(OS&&OS.available)setTimeout(fromOro,0)}
   const file=h("input",{type:"file",accept:".xml,.xlsx,.xlsm,.roz",style:"display:none",id:"tt-file",onchange:e=>guard(async()=>{
     const f=e.target.files[0];if(!f)return;
     let r;try{r=await fetch("/api/timetable/preview?name="+encodeURIComponent(f.name),{method:"POST",headers:{"X-Token":TOKEN,"Content-Type":"application/octet-stream"},body:f})}catch(x){throw new Error("Η εφαρμογή δεν ανταποκρίνεται.")}
@@ -514,7 +538,7 @@ TAB.timetable=async v=>{
     h("p",{class:"m",style:"color:var(--muted)"},"Αρχείο .roz του aSc: άνοιξέ το στο aSc και κάνε Αρχείο → Εξαγωγή → XML.")),box);
   function drawTT(){
     if(!TT){box.replaceChildren();return}
-    const O={days:true,primary:true,breaks:TT.have_times,create:false},M={};
+    const O=TT.orologio?{days:false,primary:false,breaks:false,create:true}:{days:true,primary:true,breaks:TT.have_times,create:false},M={};
     TT.rows.forEach(r=>M[r.name]=r.teacher_id);
     const found=TT.rows.filter(r=>r.teacher_id).length,dn=["Δε","Τρ","Τε","Πε","Πα"];
     const ck=(k,l,dis)=>{const i=h("input",{type:"checkbox",disabled:!!dis,onchange:e=>O[k]=e.target.checked});i.checked=!!O[k]&&!dis;return h("label",{class:"row",style:"cursor:pointer"},i,l)};
@@ -525,12 +549,14 @@ TAB.timetable=async v=>{
       h("div",{style:"overflow:auto;max-height:420px"},h("table",{},h("thead",{},h("tr",{},["Όνομα στο ωρολόγιο","Εκπαιδευτικός εφαρμογής","Ημέρες","Ώρες/εβδ.","Κύρια","Εναλλακτικές"].map(c=>h("th",{},c)))),h("tbody",{},trs))),
       h("h2",{style:"margin-top:16px"},"Τι θα ενημερωθεί"),
       ck("days","Ημέρες παρουσίας (διαθέσιμες ημέρες = ημέρες που διδάσκει)"),ck("primary","Κύρια και εναλλακτικές ημέρες (πρώτα οι ημέρες με τις λιγότερες ώρες)"),
-      ck("breaks","Διαθεσιμότητα ανά διάλειμμα (διαθέσιμος όταν βρίσκεται στο σχολείο)",!TT.have_times),
+      ck("breaks",TT.orologio?"Χρήση του ωρολογίου στην παραγωγή: διαθεσιμότητα ανά διάλειμμα (διαθέσιμος μόνο όταν βρίσκεται στο σχολείο)":"Διαθεσιμότητα ανά διάλειμμα (διαθέσιμος όταν βρίσκεται στο σχολείο)",!TT.have_times),
+      TT.orologio?h("p",{class:"m",style:"color:var(--muted);margin:0 0 0 24px"},"Αρχικά είναι επιλεγμένη μόνο η δημιουργία όσων λείπουν· οι ημέρες, η κύρια ημέρα και η διαθεσιμότητα δεν αλλάζουν αν δεν τα επιλέξετε."):"",
       TT.have_times?"":h("p",{class:"m",style:"color:var(--muted);margin:0 0 0 24px"},"Δεν υπάρχουν ώρες ρολογιού στο αρχείο (στο Excel πρόσθεσε το φύλλο «Ώρες»)."),
       ck("create","Δημιουργία εκπαιδευτικών που δεν υπάρχουν στην εφαρμογή"),
       h("div",{class:"row",style:"margin-top:14px"},h("button",{class:"btn pri",id:"tt-apply",onclick:e=>guard(async()=>{
         const n=Object.values(M).filter(Boolean).length;
-        if(!confirm("Θα ενημερωθεί η διαθεσιμότητα για "+(O.create?TT.rows.length:n)+" εκπαιδευτικούς (οι υπάρχουσες τιμές θα αντικατασταθούν).\nΠριν από την αλλαγή θα παρθεί αυτόματο αντίγραφο ασφαλείας.\n\nΝα συνεχιστεί;"))return;
+        const only=O.create&&!O.days&&!O.primary&&!O.breaks;
+        if(!confirm((only?"Θα δημιουργηθούν όσοι εκπαιδευτικοί του ωρολογίου δεν υπάρχουν· η διαθεσιμότητα δεν αλλάζει.":"Θα ενημερωθεί η διαθεσιμότητα για "+(O.create?TT.rows.length:n)+" εκπαιδευτικούς (οι υπάρχουσες τιμές θα αντικατασταθούν).")+"\nΠριν από την αλλαγή θα παρθεί αυτόματο αντίγραφο ασφαλείας.\n\nΝα συνεχιστεί;"))return;
         const r=await api("/api/timetable/apply",{...O,matches:M});TT=null;drawTT();
         toast("Ενημερώθηκαν "+r.updated+" εκπαιδευτικοί"+(r.created?" (νέοι: "+r.created+")":"")+(r.skipped.length?" · χωρίς αντιστοίχιση: "+r.skipped.length:"")+". Για να εφαρμοστεί στο πρόγραμμα, κάνε νέα παραγωγή.",9000)},e.currentTarget)},"Εφαρμογή"),
         h("button",{class:"btn",onclick:()=>{TT=null;drawTT()}},"Άκυρο"))))}
@@ -618,6 +644,7 @@ TAB.backup=async v=>{
       simpleTable(["Πότε","Έτος","Αιτία","Μέγεθος",""],rows,()=>{},"Δεν υπάρχουν ακόμη αυτόματα αντίγραφα.")))};
 TAB.storage=async v=>{
   const s=await api("/api/storage");
+  try{const O=await api("/api/orologio/status");if(O.suite){v.append(h("div",{class:"alert"},"ℹ Ο υπολογιστής ανήκει στη σουίτα «Σχολικές Εφαρμογές» με κοινό φάκελο "+O.suite+". Τα δεδομένα των Εφημεριών είναι στον υποφάκελο «Εφημερίες»· ο φάκελος αλλάζει από το «Ωρολόγιο Σχολείου» → Ρυθμίσεις εφαρμογής → Κοινή χρήση."));return}}catch(e){}
   const inp=h("input",{type:"text",value:"",placeholder:String.raw`π.χ. \\server\koinos\Efimeries  ή  D:\Efimeries`,style:"flex:1;min-width:280px"});
   let copy=true;
   const copyBox=h("div",{class:"hide",style:"margin-top:12px"});

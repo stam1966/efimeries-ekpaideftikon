@@ -38,7 +38,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 
 APP_TITLE = "Εφημερίες Εκπαιδευτικών"
-APP_VERSION = "0.67.1"
+APP_VERSION = "0.68.0"
 UPDATE_REPO = "stam1966/efimeries-ekpaideftikon"  # αποθετήριο GitHub από όπου ελέγχονται οι νέες εκδόσεις
 
 # Όρια εργασίας του εβδομαδιαίου σχεδιασμού (προστατεύουν από πολύ αργούς υπολογισμούς σε μεγάλα σχολεία).
@@ -216,7 +216,106 @@ def installed_data_root() -> Path:
     return (docs or (Path.home() / "Documents")) / "Εφημερίες Εκπαιδευτικών"
 
 
-def load_storage_root() -> Path:
+# ---- Σουίτα «Σχολικές Εφαρμογές» (Ωρολόγιο Σχολείου + Εφημερίες) ----------------------
+# Ρυθμίσεις του υπολογιστή: %APPDATA%\SchoolApps\suite.json {"root": φάκελος σουίτας, "role": ...} (τις γράφει
+# το Setup της σουίτας ή το Ωρολόγιο → Ρυθμίσεις εφαρμογής → Κοινή χρήση). Με φάκελο σουίτας τα δεδομένα των
+# Εφημεριών μένουν στο <φάκελος>\Εφημερίες και το Ωρολόγιο γράφει στο <φάκελος>\Κοινά το πρόγραμμα και τις απουσίες.
+SUITE_EF_DIR, SUITE_COMMON = "Εφημερίες", "Κοινά"
+
+
+def suite_config_path() -> Path:
+    if os.environ.get("SCHOOLAPPS_CONFIG"):
+        return Path(os.environ["SCHOOLAPPS_CONFIG"])
+    base = os.environ.get("APPDATA") or str(Path.home() / ".config")
+    return Path(base) / "SchoolApps" / "suite.json"
+
+
+def suite_machine() -> dict:
+    try:
+        d = json.loads(suite_config_path().read_text(encoding="utf-8-sig"))
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def suite_root() -> Optional[Path]:
+    r = str(suite_machine().get("root") or "").strip()
+    return Path(r) if r else None
+
+
+def suite_common_dir() -> Path:
+    r = suite_root()
+    return r / SUITE_COMMON if r else suite_config_path().parent / SUITE_COMMON
+
+
+def _read_common(name: str) -> Optional[dict]:
+    try:
+        d = json.loads((suite_common_dir() / name).read_text(encoding="utf-8-sig"))
+        return d if isinstance(d, dict) else None
+    except Exception:
+        return None
+
+
+def orologio_timetable() -> Optional[dict]:
+    """Το στιγμιότυπο του «Ωρολογίου Σχολείου» στη μορφή της εισαγωγής ωρολογίου:
+    {'source', 'periods': {αριθμός: (από, έως)}, 'teachers': {όνομα: {ημέρα: [ώρες]}}, 'meta': {...}}."""
+    d = _read_common("orologio.json")
+    if not d or d.get("format") != "orologio-snapshot":
+        return None
+    periods = {int(p["index"]) + 1: (_hhmm(p.get("start")), _hhmm(p.get("end"))) for p in d.get("periods", []) if "index" in p}
+    teachers: Dict[str, Dict[int, List[int]]] = {}
+    for t in d.get("teachers", []):
+        if not t.get("active", True) or not str(t.get("name", "")).strip():
+            continue
+        days = {wd: [k + 1 for k in ks] for wd, ks in enumerate(t.get("periods", [])[:5]) if ks}
+        if days:
+            teachers[str(t["name"]).strip()] = days
+    return {"source": "Ωρολόγιο Σχολείου", "periods": periods, "teachers": teachers,
+            "meta": {"updated": str(d.get("updated", "")), "school": str(d.get("school", "")), "year": str(d.get("year", "")), "count": len(teachers)}}
+
+
+def orologio_absences() -> List[dict]:
+    """Απουσίες από τις Αναπληρώσεις του Ωρολογίου, ενωμένες σε διαστήματα συνεχόμενων εργάσιμων ημερών
+    ανά εκπαιδευτικό: [{'name', 'from', 'to', 'full': όλη η ημέρα, 'periods', 'reason', 'key'}]."""
+    d = _read_common("apousies.json")
+    if not d or d.get("format") != "orologio-absences":
+        return []
+    by: Dict[Tuple[str, bool, str], List[date]] = {}
+    info: Dict[Tuple[str, bool, str], dict] = {}
+    for a in d.get("absences", []):
+        try:
+            day = date.fromisoformat(str(a.get("date")))
+        except ValueError:
+            continue
+        name = str(a.get("name", "")).strip()
+        if not name:
+            continue
+        full = a.get("periods") is None
+        k = (name, full, str(a.get("reason", "") or ""))
+        by.setdefault(k, []).append(day)
+        info.setdefault(k, {"periods": {}})["periods"][day.isoformat()] = a.get("periods")
+    out = []
+    for (name, full, reason), days in by.items():
+        days = sorted(set(days))
+        start = prev = days[0]
+        for dd in days[1:] + [None]:
+            nxt = prev + timedelta(days=1)
+            while nxt.weekday() > 4:
+                nxt += timedelta(days=1)
+            if dd is not None and dd == nxt:
+                prev = dd
+                continue
+            per = None if full else sorted({p + 1 for x in (start + timedelta(days=i) for i in range((prev - start).days + 1))
+                                            for p in (info[(name, full, reason)]["periods"].get(x.isoformat()) or [])})
+            out.append({"name": name, "from": start.isoformat(), "to": prev.isoformat(), "full": full, "periods": per, "reason": reason,
+                        "key": f"{name}|{start.isoformat()}|{prev.isoformat()}|{int(full)}"})
+            if dd is not None:
+                start = prev = dd
+    out.sort(key=lambda x: (x["from"], x["name"]))
+    return out
+
+
+def _legacy_storage_root() -> Path:
     if CONFIG_PATH.exists():
         try:
             cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
@@ -243,6 +342,24 @@ def load_storage_root() -> Path:
         except Exception:
             pass
     return app_dir()
+
+
+def load_storage_root() -> Path:
+    """Φάκελος δεδομένων: της σουίτας αν έχει οριστεί (με μεταφορά των υπαρχόντων δεδομένων την πρώτη φορά),
+    αλλιώς όπως πριν."""
+    legacy = _legacy_storage_root()
+    r = suite_root()
+    if not r:
+        return legacy
+    target = r / SUITE_EF_DIR
+    try:
+        if not (target / "data").exists() and (legacy / "data").exists() and legacy.resolve() != target.resolve():
+            target.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(legacy / "data", target / "data")
+            LOG.info("Σουίτα: μεταφορά δεδομένων από %s στο %s", legacy, target)
+    except Exception:
+        LOG.exception("Σουίτα: αποτυχία μεταφοράς δεδομένων")
+    return target
 
 
 def save_storage_root(root: Path) -> None:

@@ -1293,6 +1293,10 @@ class WebUI:
             tt = m.parse_xlsx_timetable(raw) if ext in (".xlsx", ".xlsm") else m.parse_asc_timetable(raw)
         except Exception as exc:  # noqa: BLE001
             raise ApiError(str(exc))
+        return self._tt_preview(tt, name)
+
+    def _tt_preview(self, tt: dict, name: str, orologio: str = ""):
+        m = self.mod
         info = m.analyze_timetable(tt)
         teachers = self.db.teachers()
         used = set()
@@ -1307,8 +1311,8 @@ class WebUI:
             rows.append({"name": nm, "teacher_id": t.id if t else None, "days": list(i["days"]), "total": i["total"],
                          "primary": i["primary"], "alternates": list(i["alternates"])})
         have_times = bool(tt.get("periods")) and any(a and z for a, z in tt["periods"].values())
-        self._tt = {"tt": tt, "info": info}
-        return {"file": name, "rows": rows, "have_times": have_times, "bad_rows": int(tt.get("bad_rows") or 0),
+        self._tt = {"tt": tt, "info": info, "orologio": orologio}
+        return {"file": name, "rows": rows, "have_times": have_times, "bad_rows": int(tt.get("bad_rows") or 0), "orologio": bool(orologio),
                 "teachers": [{"id": t.id, "name": t.name} for t in teachers if t.active]}
 
     def api_timetable_apply(self, p, b):
@@ -1330,15 +1334,80 @@ class WebUI:
             rows.append((nm, t, info[nm]))
         have_times = bool(tt.get("periods")) and any(a and z for a, z in tt["periods"].values())
         opt = {"days": bool(b.get("days", True)), "primary": bool(b.get("primary", True)), "breaks": bool(b.get("breaks")) and have_times, "create": bool(b.get("create"))}
-        if not (opt["days"] or opt["primary"] or opt["breaks"]):
+        if not (opt["days"] or opt["primary"] or opt["breaks"] or opt["create"]):
             raise ApiError("Επίλεξε τουλάχιστον ένα στοιχείο προς ενημέρωση.")
         with _Captured() as cap:
             res = self.app._apply_timetable(rows, tt, opt)
         if not res:
             raise ApiError("Η εισαγωγή απέτυχε και δεν έγινε καμία αλλαγή. " + " ".join(cap.messages))
         self.app._absent_cache = None
+        if st.get("orologio"):
+            self.db.set_setting("orologio_seen", st["orologio"])
         self._tt = None
         return {"ok": True, **res}
+
+    # ------------------------------------------- σουίτα: από το «Ωρολόγιο Σχολείου» (v0.68)
+    def _orologio_abs_pending(self):
+        m, c = self.mod, self.db.conn
+        try:
+            done = set(json.loads(self.db.get_setting("orologio_abs_done", "[]") or "[]"))
+        except Exception:
+            done = set()
+        teachers = self.db.teachers()
+        out = []
+        for a in m.orologio_absences():
+            if a["key"] in done:
+                continue
+            t = m.match_teacher_name(a["name"], teachers)
+            if t is not None and c.execute("SELECT 1 FROM absences WHERE teacher_id=? AND d_from<=? AND d_to>=?", (t.id, a["from"], a["to"])).fetchone():
+                continue          # υπάρχει ήδη απουσία που την καλύπτει
+            out.append({**a, "teacher_id": t.id if t else None, "teacher": t.name if t else ""})
+        return out, done
+
+    def api_orologio_status(self, p, b):
+        m = self.mod
+        tt = m.orologio_timetable()
+        root = m.suite_root()
+        pend, _ = self._orologio_abs_pending()
+        if not tt:
+            return {"available": False, "suite": str(root or ""), "absences": pend}
+        meta = tt["meta"]
+        return {"available": True, "suite": str(root or ""), "updated": meta["updated"], "school": meta["school"], "year": meta["year"], "count": meta["count"],
+                "new": meta["updated"] != self.db.get_setting("orologio_seen", ""), "absences": pend}
+
+    def api_orologio_preview(self, p, b):
+        tt = self.mod.orologio_timetable()
+        if not tt:
+            raise ApiError("Δεν βρέθηκε πρόγραμμα από το «Ωρολόγιο Σχολείου». Ανοίξτε το Ωρολόγιο και αποθηκεύστε το πρόγραμμα.")
+        return self._tt_preview(tt, "Ωρολόγιο Σχολείου (" + tt["meta"]["updated"] + ")", tt["meta"]["updated"])
+
+    def api_orologio_absences_import(self, p, b):
+        app, c = self.app, self.db.conn
+        pend, done = self._orologio_abs_pending()
+        keys = set(b.get("keys") or [])
+        skip = set(b.get("skip") or [])
+        chosen = [a for a in pend if a["key"] in keys]
+        snap = app._undo_snapshot() if chosen else None
+        n = replaced = 0
+        missing = []
+        for a in chosen:
+            tid = int(b.get("teachers", {}).get(a["key"]) or a["teacher_id"] or 0)
+            if not tid or not c.execute("SELECT 1 FROM teachers WHERE id=?", (tid,)).fetchone():
+                missing.append(a["name"]); continue
+            d1, d2 = self._d(a["from"]), self._d(a["to"])
+            reason = (a["reason"] or "Απουσία") + ("" if a["full"] else " (ώρες " + ", ".join(str(x) for x in a["periods"] or []) + ")") + " — από το Ωρολόγιο"
+            app._add_absence(tid, d1, d2, reason)
+            if b.get("replace", True):
+                plan, _locked = app._plan_absence(tid, d1, d2)
+                replaced += app._apply_absence_plan(tid, plan, reason, False)
+            done.add(a["key"]); n += 1
+        for k in skip:
+            done.add(k)
+        self.db.set_setting("orologio_abs_done", json.dumps(sorted(done), ensure_ascii=False))
+        if snap is not None:
+            app._undo_push("απουσίες από το Ωρολόγιο", snap)
+        app.refresh_all()
+        return {"ok": True, "imported": n, "replaced": replaced, "missing": missing}
 
     # --------------------------------------------------------------- βάρδιες (v0.66)
     def _shift_dict(self, sh) -> dict:
