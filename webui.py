@@ -488,6 +488,17 @@ class WebUI:
         self.app.refresh_all()
         return {"ok": True, "id": cur.lastrowid}
 
+    def api_teacher_participates(self, p, b):
+        c = self.db.conn
+        tid = int(b.get("id", 0))
+        if not c.execute("SELECT 1 FROM teachers WHERE id=?", (tid,)).fetchone():
+            raise ApiError("Ο εκπαιδευτικός δεν βρέθηκε")
+        c.execute("UPDATE teachers SET participates=? WHERE id=?", (1 if b.get("on") else 0, tid))
+        c.commit()
+        self.app._absent_cache = None
+        self.app.refresh_all()
+        return {"ok": True}
+
     # ------------------------------------------------------------------ απουσίες
     def api_absences(self, p, b):
         rows = self.app._absence_rows()
@@ -1308,12 +1319,12 @@ class WebUI:
             if t is not None:
                 used.add(t.id)
             i = info[nm]
-            rows.append({"name": nm, "teacher_id": t.id if t else None, "days": list(i["days"]), "total": i["total"],
+            rows.append({"name": nm, "teacher_id": t.id if t else None, "days": list(i["days"]), "total": i["total"], "participates": bool(t.participates) if t else True,
                          "primary": i["primary"], "alternates": list(i["alternates"])})
         have_times = bool(tt.get("periods")) and any(a and z for a, z in tt["periods"].values())
         self._tt = {"tt": tt, "info": info, "orologio": orologio}
         return {"file": name, "rows": rows, "have_times": have_times, "bad_rows": int(tt.get("bad_rows") or 0), "orologio": bool(orologio),
-                "teachers": [{"id": t.id, "name": t.name} for t in teachers if t.active]}
+                "teachers": [{"id": t.id, "name": t.name, "participates": bool(t.participates)} for t in teachers if t.active]}
 
     def api_timetable_apply(self, p, b):
         st = getattr(self, "_tt", None)
@@ -1340,6 +1351,17 @@ class WebUI:
             res = self.app._apply_timetable(rows, tt, opt)
         if not res:
             raise ApiError("Η εισαγωγή απέτυχε και δεν έγινε καμία αλλαγή. " + " ".join(cap.messages))
+        part = b.get("participates") or {}       # «Συμμετέχει στις εφημερίες» ανά όνομα του ωρολογίου
+        if part:
+            c = self.db.conn
+            for nm, t, _i in rows:
+                if nm not in part:
+                    continue
+                tid = t.id if t is not None else (c.execute("SELECT id FROM teachers WHERE name=?", (nm,)).fetchone() or [None])[0]
+                if tid:
+                    c.execute("UPDATE teachers SET participates=? WHERE id=?", (1 if part[nm] else 0, tid))
+            c.commit()
+            self.app.refresh_all()
         self.app._absent_cache = None
         if st.get("orologio"):
             self.db.set_setting("orologio_seen", st["orologio"])
@@ -1359,6 +1381,8 @@ class WebUI:
             if a["key"] in done:
                 continue
             t = m.match_teacher_name(a["name"], teachers)
+            if t is not None and not t.participates:
+                continue          # δεν συμμετέχει στις εφημερίες (π.χ. από διάθεση): δεν υπάρχει εφημερία να καλυφθεί
             if t is not None and c.execute("SELECT 1 FROM absences WHERE teacher_id=? AND d_from<=? AND d_to>=?", (t.id, a["from"], a["to"])).fetchone():
                 continue          # υπάρχει ήδη απουσία που την καλύπτει
             out.append({**a, "teacher_id": t.id if t else None, "teacher": t.name if t else ""})

@@ -296,22 +296,25 @@ async function openAssign(id){
       cl,h("div",{class:"grid",style:"margin-top:12px"},h("label",{class:"f"},"Λόγος",reasonSel),h("label",{class:"f"},"Σημείωση",note),h("label",{class:"row",style:"cursor:pointer"},lock,"Κλείδωσε μετά την αλλαγή"))],
       [lockBtn,h("div",{class:"sp"}),h("button",{class:"btn",onclick:closeDrawer},"Άκυρο"),okBtn])})}
 /* ---------------- Εκπαιδευτικοί ---------------- */
+let TPF="all";
 PAGE.teachers=async v=>{
-  const data=(await api("/api/teachers")).teachers;let filter="";
+  const data=(await api("/api/teachers")).teachers;let filter="",pf=TPF;
   v.append(h("h1",{},"Εκπαιδευτικοί"),h("p",{class:"sub"},"Ημέρες παρουσίας, κύρια και εναλλακτικές ημέρες εφημερίας. Πάτησε μια γραμμή για επεξεργασία."));
   const search=h("input",{type:"search",placeholder:"Αναζήτηση…",oninput:e=>{filter=e.target.value.toLowerCase();draw()}});
-  v.append(h("div",{class:"row",style:"margin-bottom:12px"},search,h("div",{class:"sp"}),
+  const segp=h("div",{class:"seg"},...[["all","Όλοι"],["in","Συμμετέχουν"],["out","Εκτός εφημεριών"]].map(([k,l])=>h("button",{class:pf===k?"on":"",onclick:e=>{pf=TPF=k;segp.querySelectorAll("button").forEach(b=>b.classList.remove("on"));e.currentTarget.classList.add("on");draw()}},l)));
+  v.append(h("div",{class:"row",style:"margin-bottom:12px;flex-wrap:wrap"},search,segp,h("div",{class:"sp"}),
     h("button",{class:"btn",onclick:()=>classic("settings")},"Εισαγωγή ωρολογίου / CSV (κλασική)"),
     h("button",{class:"btn pri",onclick:addTeacher},"+ Νέος εκπαιδευτικός")));
   const card=h("div",{class:"card",style:"padding:6px 10px"});v.append(card);
   function draw(){
-    const rows=data.filter(t=>!filter||t.name.toLowerCase().includes(filter));
+    const rows=data.filter(t=>(!filter||t.name.toLowerCase().includes(filter))&&(pf==="all"||(pf==="in")===!!t.participates));
     const tb=h("tbody");rows.forEach(t=>tb.append(h("tr",{class:"clk",onclick:()=>editTeacher(t)},
       h("td",{},h("b",{},t.name),(!t.active||!t.participates)?h("span",{class:"chip",style:"margin-left:8px"},!t.active?"ανενεργός/ή":"εκτός εφημεριών"):null),
       h("td",{},h("span",{class:"dots"},t.days.map((on,i)=>h("span",{class:"dot "+(i===t.primary?"pri":t.alternates.includes(i)?"alt":on?"on":""),title:DAYS[i]},D1[i])))),
       h("td",{},t.primary>=0?DAYS[t.primary]:"—"),h("td",{},t.alternates.length?t.alternates.map(i=>DAYS[i].slice(0,3)).join(", "):"—"),
+      h("td",{style:"text-align:center",onclick:e=>e.stopPropagation()},(()=>{const c=h("input",{type:"checkbox",title:"Συμμετέχει στις εφημερίες",onchange:e=>guard(async()=>{await api("/api/teacher/participates",{id:t.id,on:e.target.checked});t.participates=e.target.checked?1:0;toast(t.name+(t.participates?": συμμετέχει στις εφημερίες":": εκτός εφημεριών")+". Για να εφαρμοστεί στο πρόγραμμα, κάντε νέα παραγωγή.",6000);draw()})});c.checked=!!t.participates;return c})()),
       h("td",{style:"text-align:right"},t.count+" εφ. · "+t.minutes+"΄"))));
-    card.replaceChildren(rows.length?h("table",{},h("thead",{},h("tr",{},["Όνομα","Ημέρες","Κύρια","Εναλλακτικές","Φόρτος έτους"].map((x,i)=>h("th",{style:i===4?"text-align:right":""},x)))),tb):h("div",{class:"empty"},"Δεν βρέθηκαν εκπαιδευτικοί."))}
+    card.replaceChildren(rows.length?h("table",{},h("thead",{},h("tr",{},["Όνομα","Ημέρες","Κύρια","Εναλλακτικές","Εφημερίες","Φόρτος έτους"].map((x,i)=>h("th",{style:i===5?"text-align:right":i===4?"text-align:center":""},x)))),tb):h("div",{class:"empty"},"Δεν βρέθηκαν εκπαιδευτικοί."))}
   draw();
   const lg=h("p",{class:"m",style:"color:var(--muted);margin-top:10px"},"Υπόμνημα: ");
   lg.append(h("span",{class:"dot pri"},"Δ")," κύρια ",h("span",{class:"dot alt"},"Τ")," εναλλακτική ",h("span",{class:"dot on"},"Π")," διαθέσιμος/η ",h("span",{class:"dot"},"Π")," μη διαθέσιμος/η");v.append(lg);
@@ -539,25 +542,27 @@ TAB.timetable=async v=>{
   function drawTT(){
     if(!TT){box.replaceChildren();return}
     const O=TT.orologio?{days:false,primary:false,breaks:false,create:true}:{days:true,primary:true,breaks:TT.have_times,create:false},M={};
-    TT.rows.forEach(r=>M[r.name]=r.teacher_id);
+    TT.rows.forEach(r=>M[r.name]=r.teacher_id);const PT={};TT.rows.forEach(r=>PT[r.name]=r.participates!==false);
     const found=TT.rows.filter(r=>r.teacher_id).length,dn=["Δε","Τρ","Τε","Πε","Πα"];
     const ck=(k,l,dis)=>{const i=h("input",{type:"checkbox",disabled:!!dis,onchange:e=>O[k]=e.target.checked});i.checked=!!O[k]&&!dis;return h("label",{class:"row",style:"cursor:pointer"},i,l)};
-    const trs=TT.rows.map(r=>{const sl=h("select",{onchange:e=>M[r.name]=e.target.value?+e.target.value:null,style:"max-width:240px"},h("option",{value:""},"— δεν αντιστοιχίστηκε —"),...TT.teachers.map(t=>h("option",{value:t.id},t.name)));sl.value=r.teacher_id||"";
-      return h("tr",{},h("td",{},r.name),h("td",{},sl),h("td",{},r.days.map(d=>dn[d]).join(" ")),h("td",{},r.total),h("td",{},r.primary>=0?dn[r.primary]:""),h("td",{},r.alternates.map(d=>dn[d]).join(" ")))});
+    const trs=TT.rows.map(r=>{const pc=h("input",{type:"checkbox",title:"Συμμετέχει στις εφημερίες (ξεκλικάρετε όσους είναι π.χ. από διάθεση)",onchange:e=>PT[r.name]=e.target.checked});pc.checked=PT[r.name];
+      const sl=h("select",{onchange:e=>{M[r.name]=e.target.value?+e.target.value:null;const t=TT.teachers.find(x=>x.id===M[r.name]);PT[r.name]=t?t.participates!==false:true;pc.checked=PT[r.name]},style:"max-width:240px"},h("option",{value:""},"— δεν αντιστοιχίστηκε —"),...TT.teachers.map(t=>h("option",{value:t.id},t.name)));sl.value=r.teacher_id||"";
+      return h("tr",{},h("td",{},r.name),h("td",{},sl),h("td",{style:"text-align:center"},pc),h("td",{},r.days.map(d=>dn[d]).join(" ")),h("td",{},r.total),h("td",{},r.primary>=0?dn[r.primary]:""),h("td",{},r.alternates.map(d=>dn[d]).join(" ")))});
     box.replaceChildren(h("div",{class:"card"},h("h2",{},"Προεπισκόπηση: "+TT.file),
       h("p",{class:"m",style:"color:var(--muted)"},TT.rows.length+" εκπαιδευτικοί στο ωρολόγιο · "+found+" αντιστοιχίστηκαν αυτόματα με εκπαιδευτικούς της εφαρμογής."+(TT.bad_rows?" Αγνοήθηκαν "+TT.bad_rows+" μη έγκυρες γραμμές.":"")+" Διόρθωσε όπου χρειάζεται την αντιστοίχιση."),
-      h("div",{style:"overflow:auto;max-height:420px"},h("table",{},h("thead",{},h("tr",{},["Όνομα στο ωρολόγιο","Εκπαιδευτικός εφαρμογής","Ημέρες","Ώρες/εβδ.","Κύρια","Εναλλακτικές"].map(c=>h("th",{},c)))),h("tbody",{},trs))),
+      h("div",{style:"overflow:auto;max-height:420px"},h("table",{},h("thead",{},h("tr",{},["Όνομα στο ωρολόγιο","Εκπαιδευτικός εφαρμογής","Συμμετέχει","Ημέρες","Ώρες/εβδ.","Κύρια","Εναλλακτικές"].map(c=>h("th",{},c)))),h("tbody",{},trs))),
       h("h2",{style:"margin-top:16px"},"Τι θα ενημερωθεί"),
       ck("days","Ημέρες παρουσίας (διαθέσιμες ημέρες = ημέρες που διδάσκει)"),ck("primary","Κύρια και εναλλακτικές ημέρες (πρώτα οι ημέρες με τις λιγότερες ώρες)"),
       ck("breaks",TT.orologio?"Χρήση του ωρολογίου στην παραγωγή: διαθεσιμότητα ανά διάλειμμα (διαθέσιμος μόνο όταν βρίσκεται στο σχολείο)":"Διαθεσιμότητα ανά διάλειμμα (διαθέσιμος όταν βρίσκεται στο σχολείο)",!TT.have_times),
       TT.orologio?h("p",{class:"m",style:"color:var(--muted);margin:0 0 0 24px"},"Αρχικά είναι επιλεγμένη μόνο η δημιουργία όσων λείπουν· οι ημέρες, η κύρια ημέρα και η διαθεσιμότητα δεν αλλάζουν αν δεν τα επιλέξετε."):"",
+      h("p",{class:"m",style:"color:var(--muted)"},"Στήλη «Συμμετέχει»: ξεκλικάρετε όσους δεν κάνουν εφημερίες (π.χ. από διάθεση). Για όσους υπάρχουν ήδη δείχνει την τωρινή ρύθμιση."),
       TT.have_times?"":h("p",{class:"m",style:"color:var(--muted);margin:0 0 0 24px"},"Δεν υπάρχουν ώρες ρολογιού στο αρχείο (στο Excel πρόσθεσε το φύλλο «Ώρες»)."),
       ck("create","Δημιουργία εκπαιδευτικών που δεν υπάρχουν στην εφαρμογή"),
       h("div",{class:"row",style:"margin-top:14px"},h("button",{class:"btn pri",id:"tt-apply",onclick:e=>guard(async()=>{
         const n=Object.values(M).filter(Boolean).length;
         const only=O.create&&!O.days&&!O.primary&&!O.breaks;
         if(!confirm((only?"Θα δημιουργηθούν όσοι εκπαιδευτικοί του ωρολογίου δεν υπάρχουν· η διαθεσιμότητα δεν αλλάζει.":"Θα ενημερωθεί η διαθεσιμότητα για "+(O.create?TT.rows.length:n)+" εκπαιδευτικούς (οι υπάρχουσες τιμές θα αντικατασταθούν).")+"\nΠριν από την αλλαγή θα παρθεί αυτόματο αντίγραφο ασφαλείας.\n\nΝα συνεχιστεί;"))return;
-        const r=await api("/api/timetable/apply",{...O,matches:M});TT=null;drawTT();
+        const r=await api("/api/timetable/apply",{...O,matches:M,participates:PT});TT=null;drawTT();
         toast("Ενημερώθηκαν "+r.updated+" εκπαιδευτικοί"+(r.created?" (νέοι: "+r.created+")":"")+(r.skipped.length?" · χωρίς αντιστοίχιση: "+r.skipped.length:"")+". Για να εφαρμοστεί στο πρόγραμμα, κάνε νέα παραγωγή.",9000)},e.currentTarget)},"Εφαρμογή"),
         h("button",{class:"btn",onclick:()=>{TT=null;drawTT()}},"Άκυρο"))))}
   drawTT()};
