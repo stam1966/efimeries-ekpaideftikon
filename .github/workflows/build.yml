@@ -167,6 +167,7 @@ jobs:
           $txt = Get-Content CHANGELOG.md -Raw -Encoding utf8
           $parts = [regex]::Split($txt, '(?m)^# Αλλαγές ')
           $notes = if ($parts.Length -gt 1) { "# Αλλαγές " + $parts[1].Trim() } else { "Εφημερίες Εκπαιδευτικών v$v" }
+          $notes = $notes + "`n`n[Code signing policy](https://github.com/stam1966/efimeries-ekpaideftikon/blob/main/CODE_SIGNING_POLICY.md) · Άδεια: GPL-3.0 · Ιδέα και σχεδιασμός: Σταμάτης Κοκολόγος, εκπαιδευτικός ΠΕ70, 22ο Δημοτικό Σχολείο Λαμίας"
           Set-Content -Path release/NOTES.md -Value $notes -Encoding utf8
           exit 0
 

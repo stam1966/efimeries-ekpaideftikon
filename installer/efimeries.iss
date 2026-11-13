@@ -56,6 +56,7 @@ Name: "desktopicon"; Description: "Εικονίδιο στην επιφάνει�
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Excludes: "data\*,exports\*,backups\*,storage_config.json,update_state.json,create_shortcut.bat"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Σημαία «εγκατεστημένη εφαρμογή»: τα δεδομένα πηγαίνουν στα Έγγραφα και όχι στον φάκελο της εφαρμογής
 Source: "installed.flag"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\Εφημερίες Εκπαιδευτικών"; Filename: "{app}\{#ExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\app_icon.ico"

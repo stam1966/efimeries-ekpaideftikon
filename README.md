@@ -2,9 +2,14 @@
 
 *Ιδέα και σχεδιασμός: Σταμάτης Κοκολόγος, εκπαιδευτικός ΠΕ70, 22ο Δημοτικό Σχολείο Λαμίας.*
 
+[Code signing policy](CODE_SIGNING_POLICY.md) · Άδεια χρήσης: [GPL-3.0](LICENSE)
+
 Εφαρμογή Windows (Python / Tkinter / SQLite) για δημιουργία και διαχείριση προγράμματος εφημεριών εκπαιδευτικών.
 
 ## Λήψη
+
+**Code signing policy:** βλ. [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md). Απεγκατάσταση: Ρυθμίσεις των Windows → Εφαρμογές (τα δεδομένα δεν σβήνονται).
+
 **Μόνιμοι σύνδεσμοι (δείχνουν πάντα στην τελευταία έκδοση, δεν αλλάζουν ποτέ):**
 - [Setup 64-bit](https://github.com/stam1966/efimeries-ekpaideftikon/releases/latest/download/Efimeries_Setup_x64.exe) (οι περισσότεροι υπολογιστές)
 - [Setup 32-bit](https://github.com/stam1966/efimeries-ekpaideftikon/releases/latest/download/Efimeries_Setup_x86.exe)
