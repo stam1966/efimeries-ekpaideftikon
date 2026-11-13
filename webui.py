@@ -343,6 +343,7 @@ class WebUI:
         except Exception:
             pass
         return {
+            "sibling": bool(self.mod.orologio_launcher()),
             "school": db.get_setting("school_name", "").strip() or "Σχολείο",
             "year": db.get_setting("school_year"),
             "mode": db.get_setting("mode", "daily"),
@@ -1387,6 +1388,23 @@ class WebUI:
                 continue          # υπάρχει ήδη απουσία που την καλύπτει
             out.append({**a, "teacher_id": t.id if t else None, "teacher": t.name if t else ""})
         return out, done
+
+    def api_guide(self, p, b):
+        path = self.mod.resource_path("Odigos_Chrisis_Efimeries.pdf")
+        if not path.exists():
+            raise ApiError("Ο οδηγός χρήσης δεν βρέθηκε.")
+        if sys.platform.startswith("win"):
+            os.startfile(str(path))  # type: ignore[attr-defined]
+        else:
+            webbrowser.open(path.as_uri())
+        return {"ok": True}
+
+    def api_launch_orologio(self, p, b):
+        cmd = self.mod.orologio_launcher()
+        if not cmd:
+            raise ApiError("Το «Ωρολόγιο Σχολείου» δεν είναι εγκατεστημένο σε αυτόν τον υπολογιστή.")
+        subprocess.Popen(cmd, cwd=str(Path(cmd[-1]).parent.parent), close_fds=True)
+        return {"ok": True}
 
     def api_orologio_status(self, p, b):
         m = self.mod

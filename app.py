@@ -14,6 +14,7 @@ import os
 import sqlite3
 import sys
 import webbrowser
+import subprocess
 import html
 import json
 import calendar
@@ -38,7 +39,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 
 APP_TITLE = "Εφημερίες Εκπαιδευτικών"
-APP_VERSION = "0.68.1"
+APP_VERSION = "0.69.0"
 UPDATE_REPO = "stam1966/efimeries-ekpaideftikon"  # αποθετήριο GitHub από όπου ελέγχονται οι νέες εκδόσεις
 
 # Όρια εργασίας του εβδομαδιαίου σχεδιασμού (προστατεύουν από πολύ αργούς υπολογισμούς σε μεγάλα σχολεία).
@@ -272,6 +273,15 @@ def orologio_timetable() -> Optional[dict]:
             teachers[str(t["name"]).strip()] = days
     return {"source": "Ωρολόγιο Σχολείου", "periods": periods, "teachers": teachers,
             "meta": {"updated": str(d.get("updated", "")), "school": str(d.get("school", "")), "year": str(d.get("year", "")), "count": len(teachers)}}
+
+
+def orologio_launcher() -> Optional[List[str]]:
+    """Εντολή εκκίνησης του «Ωρολογίου Σχολείου» αν είναι εγκατεστημένο σε αυτόν τον υπολογιστή."""
+    base = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local")) / "Programs" / "OrologioDimotikou"
+    exe = base / "runtime" / "pythonw.exe"
+    if exe.exists() and (base / "src" / "server.py").exists():
+        return [str(exe), "-X", "utf8", str(base / "src" / "server.py")]
+    return None
 
 
 def orologio_absences() -> List[dict]:
@@ -1253,6 +1263,19 @@ class EfimeriesApp(tk.Tk):
                         self._remove_lock_file()
                         continue
                     return False
+                if same_host:   # ήδη ανοιχτή σε αυτόν τον υπολογιστή: άνοιγμα του υπάρχοντος παραθύρου
+                    try:
+                        info2 = json.loads((suite_config_path().parent / "efimeries.url").read_text(encoding="utf-8"))
+                        if info2.get("pid") == lock_pid and info2.get("url"):
+                            import webui as _w
+                            edge = _w.find_edge()
+                            if edge:
+                                subprocess.Popen([edge, "--app=" + info2["url"], "--start-maximized"], close_fds=True)
+                            else:
+                                webbrowser.open(info2["url"])
+                            return False
+                    except Exception:
+                        pass
                 msg = (
                     "Ο κοινόχρηστος φάκελος δεδομένων χρησιμοποιείται ήδη.\n\n"
                     f"Υπολογιστής: {lock_host}\nΔιεργασία: {lock_pid if lock_pid is not None else '?'}\nΈναρξη: {started}\n\n"
@@ -6954,6 +6977,12 @@ class EfimeriesApp(tk.Tk):
                 self._webui = ui
                 url = ui.start()
                 self._webui_url = url
+                try:   # για δεύτερη εκκίνηση (π.χ. από το Ωρολόγιο): ανοίγει το ίδιο παράθυρο αντί για μήνυμα κλειδώματος
+                    p = suite_config_path().parent / "efimeries.url"
+                    p.parent.mkdir(parents=True, exist_ok=True)
+                    p.write_text(json.dumps({"url": url, "pid": os.getpid(), "host": socket.gethostname()}), encoding="utf-8")
+                except Exception:
+                    pass
             else:
                 url = self._webui_url
                 ui.hidden = hidden or ui.hidden

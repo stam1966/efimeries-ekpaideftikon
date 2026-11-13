@@ -126,7 +126,31 @@ details>summary{cursor:pointer;font-weight:600;color:var(--muted)}
 .hide{display:none!important}
 .upd{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 16px;border-radius:12px;background:var(--accent-soft);color:var(--accent);margin-bottom:14px;font-weight:600}
 .bar{height:8px;border-radius:99px;background:var(--line);overflow:hidden;min-width:180px;flex:1}.bar i{display:block;height:100%;background:var(--accent);width:0;transition:width .2s}
-@media (max-width:860px){.app{grid-template-columns:1fr}.side{flex-direction:row;overflow:auto;padding:8px;border-right:0;border-bottom:1px solid var(--line)}.brand,.side .foot{display:none}.nav{flex-direction:row}.main{padding:18px 14px 60px}}
+/* ---- κοινή εμφάνιση με το «Ωρολόγιο Σχολείου»: σκούρα πλαϊνή μπάρα με ομάδες, μενού, γραμμή εργαλείων, μεγάλα εικονίδια ---- */
+.side{background:#1f3550;color:#e8eef6;border-right:0}
+.brand b{color:#fff}.brand span{color:#b9c7d8}
+.nav .grp{font-size:10.5px;letter-spacing:.9px;text-transform:uppercase;color:#93a7bf;padding:14px 12px 4px;font-weight:700}
+.nav a{color:#dfe7f1;font-weight:500}.nav a:hover{background:#ffffff14}.nav a.on{background:#ffffff22;color:#fff;box-shadow:inset 3px 0 0 #f2c230}
+.nav a .n{width:22px;height:22px;border-radius:50%;border:1.5px solid #8fa5bf;display:inline-grid;place-items:center;font-size:11.5px;font-weight:700;flex:none}
+.nav a.on .n{border-color:#f2c230;color:#f2c230}
+.side .foot{color:#9fb1c6}.side .foot a{color:#dfe7f1;display:block;padding:7px 2px;cursor:pointer;text-decoration:none;font-weight:600}.side .foot a:hover{color:#fff}
+.mainc{display:flex;flex-direction:column;min-width:0;height:100vh}
+.mainc .main{flex:1}
+.menubar{display:flex;align-items:stretch;gap:2px;padding:0 10px;height:30px;background:var(--panel);border-bottom:1px solid var(--line);font-size:13.5px;flex:none}
+.menubar>button{background:none;border:0;padding:0 11px;cursor:pointer;border-radius:5px;margin:3px 0}.menubar>button:hover,.menubar>button.open{background:var(--panel2)}
+.menubar>button.rtab{font-weight:650;color:var(--accent)}.menubar>button.ron{box-shadow:inset 0 -2px 0 var(--accent);border-radius:5px 5px 0 0}.menubar .rshow{margin-left:auto;font-size:12px;color:var(--muted)}
+.popmenu{position:fixed;z-index:60;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:6px;min-width:290px;max-height:calc(100vh - 50px);overflow:auto}
+.popmenu button{display:flex;width:100%;justify-content:space-between;gap:16px;background:none;border:0;padding:7px 10px;border-radius:6px;font-size:13.5px;cursor:pointer;text-align:left}
+.popmenu button:hover:not(:disabled),.popmenu button:focus-visible{background:var(--panel2);outline:none}.popmenu button:disabled{color:var(--muted);cursor:default}.popmenu hr{border:0;border-top:1px solid var(--line);margin:5px 4px}.popmenu kbd{font:inherit;font-size:11.5px;color:var(--muted)}
+.ribbon{display:flex;align-items:stretch;gap:2px;padding:4px 10px;background:var(--panel);border-bottom:1px solid var(--line);flex:none;overflow-x:auto;min-height:64px}
+.ribbon.off{display:none}.ribbon .rb{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:58px;max-width:96px;padding:5px 6px 4px;border:0;border-radius:6px;background:none;font-size:11.5px;line-height:1.2;cursor:pointer;text-align:center;flex:none}
+.ribbon .rb i{font-style:normal;font-size:21px;line-height:24px;height:24px}.ribbon .rb:hover:not(:disabled){background:var(--panel2)}.ribbon .rb.on{background:var(--accent-soft);box-shadow:inset 0 -2px 0 var(--accent)}.ribbon .rb:disabled{opacity:.4;cursor:default}
+.ribbon .rsep{width:1px;background:var(--line);margin:4px 5px;flex:none}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-bottom:18px}
+.htile{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--panel);cursor:pointer;text-align:left;box-shadow:var(--shadow);transition:border-color .12s,transform .12s}
+.htile:hover{border-color:var(--accent);transform:translateY(-1px)}.htile i{font-style:normal;font-size:38px;line-height:44px}.htile b{font-size:15px}.htile span{font-size:12.5px;color:var(--muted);line-height:1.35}.htile em{font-style:normal;font-size:12px;color:var(--accent);font-weight:650}
+.htile.main{border-color:var(--accent);background:var(--accent-soft)}
+@media (max-width:860px){.app{grid-template-columns:1fr}.ribbon,.menubar{display:none}.nav .grp{display:none}.side{flex-direction:row;overflow:auto;padding:8px;border-right:0;border-bottom:1px solid var(--line)}.brand,.side .foot{display:none}.nav{flex-direction:row}.main{padding:18px 14px 60px}}
 </style>
 </head>
 <body>
@@ -134,9 +158,10 @@ details>summary{cursor:pointer;font-weight:600;color:var(--muted)}
   <aside class="side">
     <div class="brand"><b id="bSchool">Εφημερίες</b><span id="bYear"></span></div>
     <nav class="nav" id="nav"></nav>
-    <div class="foot"><span id="bVer"></span></div>
+    <div class="foot"><a id="nAppSet" href="#appsettings">⚙ Ρυθμίσεις εφαρμογής</a><a id="nSib" class="hide" title="Άνοιγμα της άλλης εφαρμογής της σουίτας">📅 Ωρολόγιο Σχολείου ↗</a><span id="bVer"></span></div>
   </aside>
-  <main class="main"><div class="wrap" id="view"></div></main>
+  <div class="mainc"><nav class="menubar" id="menubar" aria-label="Μενού εφαρμογής"></nav><div class="ribbon" id="ribbon" role="toolbar" aria-label="Γραμμή εργαλείων"></div>
+  <main class="main"><div class="wrap" id="view"></div></main></div>
 </div>
 <div class="drawer-bg" id="bg"></div>
 <aside class="drawer" id="drawer"><header><div><h2 id="dTitle"></h2><div class="m" id="dSub" style="color:var(--muted)"></div></div><button class="x" id="dClose" aria-label="Κλείσιμο">×</button></header><div class="body" id="dBody"></div><footer id="dFoot"></footer></aside>
@@ -171,20 +196,61 @@ const ICON={
  print:'<path d="M7 9V3h10v6M7 17H5a2 2 0 01-2-2v-4a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2h-2M7 14h10v7H7z"/>',
  more:'<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>',
  gear:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 01-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 010-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 014 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 010 4h-.1a1.7 1.7 0 00-1.5 1z"/>'};
-const PAGES=[["home","Αρχική","home"],["schedule","Πρόγραμμα","cal"],["teachers","Εκπαιδευτικοί","people"],["absences","Απουσίες","off"],["generate","Παραγωγή","gen"],["reports","Εκτυπώσεις","print"],["settings","Ρυθμίσεις","gear"]];
+/* Ίδια διάταξη με το «Ωρολόγιο Σχολείου»: Αρχική · Στήσιμο χρονιάς · Πρόγραμμα · Καθημερινά · Ρυθμίσεις εφαρμογής κάτω */
+const PAGES=[["home","Αρχική","home"],["settings","Ρυθμίσεις σχολείου","gear"],["teachers","Εκπαιδευτικοί","people"],["generate","Παραγωγή","gen"],["schedule","Πρόγραμμα","cal"],["reports","Εκτυπώσεις","print"],["absences","Απουσίες","off"],["appsettings","Ρυθμίσεις εφαρμογής","gear"]];
+const GROUPS={settings:"Στήσιμο χρονιάς",generate:"Πρόγραμμα",absences:"Καθημερινά"};
 let S=null,cur="home";
 const nav=$("#nav");
-PAGES.forEach(([k,l,ic])=>nav.append(h("a",{id:"n-"+k,href:"#"+k,html:`<svg viewBox="0 0 24 24">${ICON[ic]}</svg>`},l)));
+PAGES.filter(p=>p[0]!=="appsettings").forEach(([k,l],i)=>{if(GROUPS[k])nav.append(h("div",{class:"grp"},GROUPS[k]));
+  nav.append(h("a",{id:"n-"+k,href:"#"+k,html:`<span class="n">${k==="home"?"🏠":i}</span>`},l))});
+$("#nSib").onclick=launchOrologio;
+async function launchOrologio(){await guard(async()=>{await api("/api/launch/orologio",{});toast("Ανοίγει το «Ωρολόγιο Σχολείου»…")})}
 function go(k){location.hash="#"+k}
 window.addEventListener("hashchange",route);
 async function route(){
   cur=(location.hash||"#home").slice(1).split("/")[0];if(cur==="more")cur="settings";if(!PAGES.some(p=>p[0]===cur))cur="home";
-  PAGES.forEach(p=>$("#n-"+p[0]).classList.toggle("on",p[0]===cur));
+  PAGES.forEach(p=>{const a=$("#n-"+p[0]);if(a)a.classList.toggle("on",p[0]===cur)});$("#nAppSet").style.color=cur==="appsettings"?"#f2c230":"";
   closeDrawer();
   const v=$("#view");v.replaceChildren(h("div",{class:"empty"},"Φόρτωση…"));
-  try{S=await api("/api/state");if(S.theme!==THEME){THEME=S.theme||"auto";applyTheme()}$("#bSchool").textContent=S.school;$("#bYear").textContent="Σχολικό έτος "+S.year;$("#bVer").textContent="v"+S.version+" · "+S.arch;
+  try{S=await api("/api/state");if(S.theme!==THEME){THEME=S.theme||"auto";applyTheme()}$("#bSchool").textContent=S.school;$("#bYear").textContent="Σχολικό έτος "+S.year;$("#bVer").textContent="v"+S.version+" · "+S.arch;$("#nSib").classList.toggle("hide",!S.sibling);renderMenubar();renderRibbon();
     v.replaceChildren();if(S.update)v.append(updBanner());await PAGE[cur](v)}catch(e){v.replaceChildren(h("div",{class:"alert bad"},"⚠ "+e.message))}
 }
+/* ---------------- Μενού και γραμμή εργαλείων (όπως στο «Ωρολόγιο Σχολείου») ---------------- */
+const goSet=t=>{ST.tab=t;location.hash==="#settings"?route():go("settings")},goApp=t=>{AT.tab=t;location.hash==="#appsettings"?route():go("appsettings")};
+function MENUS(){const ok=!!S;return [
+ ["Αρχείο",[["💾 Αντίγραφα ασφαλείας…","",()=>goApp("backup")],["📂 Αποθήκευση δεδομένων (φάκελος)…","",()=>goApp("storage")],["-"],
+   ["🗓 Σχολικό έτος…","",()=>goSet("year")],["-"],["🖨 Εκτυπώσεις και εξαγωγές","",()=>go("reports")],["🖨 Εκτύπωση τρέχοντος μήνα","",()=>printRange(...monthRange(new Date()))],["-"],
+   ["⏻ Έξοδος","",()=>{if(confirm("Να κλείσει η εφαρμογή;"))api("/api/quit",{}).then(()=>{document.body.innerHTML='<div style="padding:60px;text-align:center;font:16px system-ui">Η εφαρμογή έκλεισε.</div>'})}]]],
+ ["Επεξεργασία",[["↶ Αναίρεση","",doUndo,ok&&!!S.can_undo],["-"],["👤 Νέος εκπαιδευτικός","",()=>{go("teachers");setTimeout(addTeacher,300)}],["🚫 Καταχώρηση απουσίας","",()=>go("absences")]]],
+ ["Προβολή",PAGES.map(([k,l],i)=>[(cur===k?"✓":"")+"|"+(k==="home"||k==="appsettings"?"":i+". ")+PICON[k]+" "+l,"",()=>go(k)])],
+ ["Πρόγραμμα",[["✨ Παραγωγή προγράμματος…","",()=>go("generate")],["📅 Πρόγραμμα","",()=>go("schedule")],["🖨 Εκτυπώσεις","",()=>go("reports")]]],
+ ["Εργαλεία",[["🔄 Ενημέρωση από το Ωρολόγιο…","",()=>{ORO=true;goSet("timetable")}],["📥 Εισαγωγή ωρολογίου (aSc / Excel)","",()=>goSet("timetable")],
+   ...(ok&&S.sibling?[["📅 Ωρολόγιο Σχολείου ↗","",launchOrologio]]:[]),["-"],["🧰 Κλασική διεπαφή","",()=>classic("")],["⚙ Ρυθμίσεις εφαρμογής","",()=>goApp("app")]]],
+ ["Βοήθεια",[["📖 Οδηγός χρήσης","",()=>guard(async()=>{await api("/api/guide",{})})],["🔎 Έλεγχος για νέα έκδοση","",()=>goApp("app")],["ℹ Σχετικά","",()=>openDrawer("Εφημερίες Εκπαιδευτικών","Έκδοση v"+(S?S.version+" · "+S.arch:""),h("p",{},"Πρόγραμμα εφημεριών εκπαιδευτικών. Λειτουργεί τοπικά· τα δεδομένα δεν φεύγουν από τον υπολογιστή ή τον κοινό φάκελο του σχολείου."),h("button",{class:"btn",onclick:closeDrawer},"Κλείσιμο"))]]]];}
+const PICON={home:"🏠",settings:"🏫",teachers:"👥",generate:"✨",schedule:"📅",reports:"🖨",absences:"🚫",appsettings:"⚙"};
+let MBO=-1,RIB=localStorage.getItem("ef.rib")||"home",RIBOFF=localStorage.getItem("ef.riboff")==="1";
+function renderMenubar(){const m=$("#menubar");m.replaceChildren(h("button",{class:"rtab"+(RIB==="home"&&!RIBOFF?" ron":""),onclick:()=>{closeMenu();setRib("home")}},"Κεντρική"),
+  ...MENUS().map(([t],i)=>h("button",{class:(RIB===t&&!RIBOFF?"ron":""),"data-mb":i,onclick:()=>{setRib(t);MBO===i?closeMenu():openMenu(i)},onmouseenter:()=>{if(MBO>=0&&MBO!==i)openMenu(i)}},t)),
+  h("button",{class:"rshow",onclick:()=>{RIBOFF=!RIBOFF;try{localStorage.setItem("ef.riboff",RIBOFF?"1":"0")}catch(e){}renderMenubar();renderRibbon()}},RIBOFF?"▾ Εργαλεία":"▴ Απόκρυψη"))}
+function setRib(k){RIB=k;try{localStorage.setItem("ef.rib",k)}catch(e){}renderMenubar();renderRibbon()}
+function closeMenu(){document.querySelectorAll(".popmenu").forEach(x=>x.remove());document.querySelectorAll("#menubar>button").forEach(b=>b.classList.remove("open"));MBO=-1}
+function openMenu(i){closeMenu();const M=MENUS(),items=M[i][1],btn=$(`[data-mb="${i}"]`),r=btn.getBoundingClientRect();MBO=i;btn.classList.add("open");
+  const pm=h("div",{class:"popmenu",role:"menu"});pm.style.left=r.left+"px";pm.style.top=(r.bottom+1)+"px";
+  items.forEach(it=>{if(it[0]==="-"){pm.append(h("hr"));return}let [lab,key,fn,en=true]=it,ck="";if(lab.includes("|"))[ck,lab]=lab.split("|");
+    pm.append(h("button",{disabled:!en,onclick:()=>{closeMenu();setTimeout(fn,0)}},h("span",{},h("span",{style:"display:inline-block;width:16px;color:var(--ok)"},ck),lab),key?h("kbd",{},key):""))});
+  document.body.append(pm)}
+addEventListener("mousedown",e=>{if(MBO>=0&&!e.target.closest(".popmenu,#menubar"))closeMenu()},true);
+addEventListener("keydown",e=>{if(e.key==="Escape"&&MBO>=0)closeMenu()});
+function ribLabel(lab){let on=false;if(lab.includes("|")){const p=lab.split("|");on=p[0]==="✓";lab=p[1]}lab=lab.replace(/^\d+\.\s*/,"").replace(/…$/,"").replace(/ ↗$/,"");
+  const m=lab.match(/^(\p{Extended_Pictographic}\uFE0F?|[↶⏻ℹ])\s*/u);let ic="▫";if(m){ic=m[1];lab=lab.slice(m[0].length)}return {ic,lab,on}}
+function ribItems(){const M=MENUS(),f=(m,l)=>{const x=M.find(z=>z[0]===m);return x&&x[1].find(it=>it[0]&&it[0].includes(l))};
+  if(RIB==="home")return [f("Επεξεργασία","Αναίρεση"),["-"],f("Προβολή","Αρχική"),["-"],f("Πρόγραμμα","Παραγωγή"),f("Πρόγραμμα","Πρόγραμμα"),["-"],f("Επεξεργασία","απουσίας"),f("Προβολή","Εκπαιδευτικοί"),["-"],
+    f("Αρχείο","τρέχοντος μήνα"),f("Πρόγραμμα","Εκτυπώσεις"),["-"],f("Εργαλεία","Ενημέρωση από"),f("Εργαλεία","Ωρολόγιο Σχολείου"),["-"],f("Βοήθεια","Οδηγός")].filter(Boolean);
+  const x=M.find(z=>z[0]===RIB);return x?x[1]:[]}
+function renderRibbon(){const r=$("#ribbon");r.classList.toggle("off",RIBOFF);if(RIBOFF){r.replaceChildren();return}
+  const its=ribItems();while(its.length&&its[0][0]==="-")its.shift();
+  r.replaceChildren(...its.map(it=>{if(it[0]==="-")return h("span",{class:"rsep"});const [lab,key,fn,en=true]=it,L=ribLabel(lab);
+    return h("button",{class:"rb"+(L.on?" on":""),disabled:!en,title:L.lab,onclick:()=>setTimeout(fn,0)},h("i",{"aria-hidden":"true"},L.ic),h("span",{},L.lab))}))}
 /* ---------------- Συρτάρι ---------------- */
 function openDrawer(title,sub,body,foot){$("#dTitle").textContent=title;$("#dSub").textContent=sub||"";$("#dBody").replaceChildren(...[].concat(body));$("#dFoot").replaceChildren(...[].concat(foot||[]));$("#drawer").classList.add("open");$("#bg").style.display="block"}
 function closeDrawer(){$("#drawer").classList.remove("open");$("#bg").style.display="none"}
@@ -217,6 +283,14 @@ PAGE.home=async v=>{
     if(O.available&&O.new)v.append(h("div",{class:"alert"},"📅 Νέο πρόγραμμα από το «Ωρολόγιο Σχολείου» ("+O.updated+"). Ενημερώστε τους εκπαιδευτικούς — η παραγωγή αλλάζει μόνο αν το επιλέξετε.",h("a",{onclick:()=>{ST.tab="timetable";ORO=true;go("settings")}},"Ενημέρωση →")));
     if(O.absences.length)v.append(h("div",{class:"alert"},"🗓 "+O.absences.length+(O.absences.length===1?" απουσία":" απουσίες")+" από τις Αναπληρώσεις του «Ωρολογίου Σχολείου» δεν έχουν περάσει ακόμη στις εφημερίες.",h("a",{onclick:()=>go("absences")},"Εισαγωγή →")))}catch(e){}
   if(!S.attention.length&&S.assignments>0)v.append(h("div",{class:"alert ok"},"✔ Όλα εντάξει: δεν υπάρχουν σημεία που χρειάζονται προσοχή."));
+  const tile=(ic,t,d,em,fn,main)=>h("button",{class:"htile"+(main?" main":""),onclick:fn},h("i",{"aria-hidden":"true"},ic),h("b",{},t),h("span",{},d),em?h("em",{},em):"");
+  v.append(h("div",{class:"tiles"},
+    tile("📅","Πρόγραμμα","Οι εφημερίες ανά ημέρα και εβδομάδα· αλλαγές με ένα κλικ.",S.assignments?S.assignments+" εφημερίες":"Δεν υπάρχει ακόμη",()=>go("schedule"),true),
+    tile("🚫","Απουσίες","Καταχώρηση απουσίας με αυτόματους αντικαταστάτες.",null,()=>go("absences")),
+    tile("✨","Παραγωγή","Δημιουργία ή αναδημιουργία του προγράμματος.",null,()=>go("generate")),
+    tile("🖨","Εκτυπώσεις","Διάστημα, ανά εκπαιδευτικό, Excel, ημερολόγιο κινητού.",null,()=>go("reports")),
+    tile("👥","Εκπαιδευτικοί","Ημέρες, διαθεσιμότητα, ποιοι συμμετέχουν.",S.teachers+" στον κύκλο",()=>go("teachers")),
+    S.sibling?tile("🗓","Ωρολόγιο Σχολείου","Άνοιγμα της άλλης εφαρμογής της σουίτας.","↗",launchOrologio):null));
   v.append(h("div",{class:"grid g4",style:"margin-bottom:16px"},
     stat(S.teachers,"εκπαιδευτικοί στον κύκλο"),stat(S.assignments,"εφημερίες στο πρόγραμμα"),stat(MODES[S.mode]||S.mode,"τρόπος εφημερίας"),
     stat(S.spread+"΄","διαφορά φόρτου (μεγαλύτερο – μικρότερο)")));
@@ -603,11 +677,18 @@ async function editTeacherExtra(t){
     await api("/api/teacher/extra/save",{id:t.id,shift_avail:SA,interval_avail:IA,allowed:[...allowed]});closeDrawer();toast("Αποθηκεύτηκε");route()})])}
 /* ---------------- Ρυθμίσεις ---------------- */
 let ST={tab:"school"};
+const SCHOOL_TABS=[["school","Σχολείο"],["year","Σχολικό έτος"],["areas","Τομείς"],["intervals","Χρονικές ζώνες"],["shifts","Βάρδιες"],["days","Ειδικές ημέρες"],["timetable","Ωρολόγιο"]];
+const APP_TABS=[["storage","Αποθήκευση"],["backup","Αντίγραφα ασφαλείας"],["app","Εφαρμογή και ενημερώσεις"]];
+let AT={tab:"storage"};
 PAGE.settings=async v=>{
-  v.append(h("h1",{},"Ρυθμίσεις"),h("p",{class:"sub"},"Σχολείο, τομείς, χρονικές ζώνες, ειδικές ημέρες και εμφάνιση."));
-  const tabs=[["school","Σχολείο"],["year","Σχολικό έτος"],["areas","Τομείς"],["intervals","Χρονικές ζώνες"],["shifts","Βάρδιες"],["days","Ειδικές ημέρες"],["timetable","Ωρολόγιο"],["storage","Αποθήκευση"],["backup","Αντίγραφα"],["app","Εφαρμογή"]];
-  v.append(h("div",{class:"seg",style:"margin-bottom:16px;flex-wrap:wrap"},tabs.map(([k,l])=>h("button",{class:ST.tab===k?"on":"",onclick:()=>{ST.tab=k;route()}},l))));
+  if(!SCHOOL_TABS.some(t=>t[0]===ST.tab))ST.tab="school";
+  v.append(h("h1",{},"Ρυθμίσεις σχολείου"),h("p",{class:"sub"},"Σχολείο και σχολικό έτος, τομείς, χρονικές ζώνες, βάρδιες, ειδικές ημέρες, ωρολόγιο."));
+  v.append(h("div",{class:"seg",style:"margin-bottom:16px;flex-wrap:wrap"},SCHOOL_TABS.map(([k,l])=>h("button",{class:ST.tab===k?"on":"",onclick:()=>{ST.tab=k;route()}},l))));
   const box=h("div");v.append(box);await TAB[ST.tab](box)};
+PAGE.appsettings=async v=>{
+  v.append(h("h1",{},"Ρυθμίσεις εφαρμογής"),h("p",{class:"sub"},"Πού αποθηκεύονται τα δεδομένα, αντίγραφα ασφαλείας, εμφάνιση, ενημερώσεις."));
+  v.append(h("div",{class:"seg",style:"margin-bottom:16px;flex-wrap:wrap"},APP_TABS.map(([k,l])=>h("button",{class:AT.tab===k?"on":"",onclick:()=>{AT.tab=k;route()}},l))));
+  const box=h("div");v.append(box);await TAB[AT.tab](box)};
 const fld=(l,inp)=>h("label",{class:"f"},l,inp);
 const chk=(l,on,f)=>{const i=h("input",{type:"checkbox",onchange:e=>f(e.target.checked)});i.checked=!!on;return h("label",{class:"row",style:"cursor:pointer"},i,l)};
 const saveBtn=(fn,label)=>h("button",{class:"btn pri",onclick:e=>guard(fn,e.currentTarget)},label||"Αποθήκευση");
