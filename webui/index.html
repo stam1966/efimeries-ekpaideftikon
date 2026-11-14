@@ -341,18 +341,19 @@ function fairCard(){
   card.append(g,h("div",{class:"legend"},h("span",{},h("i",{style:"background:var(--accent)"}),"κοντά στον μέσο όρο (±10%)"),
     h("span",{},h("i",{style:"background:#d98a1c"}),"πάνω από τον μέσο όρο"),h("span",{},h("i",{style:"background:#7cb7d8"}),"κάτω από τον μέσο όρο")));
   return card}
+const stChip=r=>r.d<S.today?h("span",{class:"chip ok"},"πραγματοποιήθηκε"):(r.locked?h("span",{class:"chip"},"κλειδωμένη"):null);
 const stat=(n,l)=>h("div",{class:"card stat"},h("b",{},String(n)),h("span",{},l));
 function list(rows,withDate){const l=h("div",{class:"list"});rows.forEach(r=>l.append(h("div",{class:"item",onclick:()=>openAssign(r.id)},
   h("div",{style:"min-width:64px"},h("div",{class:"t"},withDate?fmt(r.d).slice(0,5):r.start),h("div",{class:"m"},withDate?r.weekday.slice(0,3):r.interval)),
   h("div",{class:"sp"},h("div",{class:"t"},r.teacher),h("div",{class:"m"},r.area+(withDate?" · "+r.interval:""))),
-  r.locked?h("span",{class:"chip"},"κλειδωμένη"):null,r.replaced?h("span",{class:"chip warn"},"αντικατάσταση"):null)));return l}
+  stChip(r),r.replaced?h("span",{class:"chip warn"},"αντικατάσταση"):null)));return l}
 async function doUndo(){await guard(async()=>{const r=await api("/api/undo",{});toast(r.msg);route()})}
 const monthRange=d=>[iso(new Date(d.getFullYear(),d.getMonth(),1)),iso(new Date(d.getFullYear(),d.getMonth()+1,0))];
 function printRange(a,z){window.open("/api/print?"+q({from:a,to:z,t:TOKEN}),"_blank")}
 /* ---------------- Πρόγραμμα ---------------- */
 let SV={view:"list",month:null,teacher:""};
 PAGE.schedule=async v=>{
-  if(!SV.month)SV.month=new Date(parse(S.today).getFullYear(),parse(S.today).getMonth(),1);
+  if(!SV.month){SV.month=new Date(parse(S.today).getFullYear(),parse(S.today).getMonth(),1);SV.goToday=true}
   const [a,z]=monthRange(SV.month);
   const rows=(await api("/api/schedule?"+q({from:a,to:z}))).rows;
   const names=[...new Set(rows.map(r=>r.teacher))].sort((x,y)=>x.localeCompare(y,"el"));
@@ -362,7 +363,7 @@ PAGE.schedule=async v=>{
     h("button",{class:"btn sm",onclick:()=>{SV.month=new Date(SV.month.getFullYear(),SV.month.getMonth()-1,1);route()},"aria-label":"Προηγούμενος μήνας"},"‹"),
     h("b",{style:"min-width:160px;text-align:center;font-size:16px"},MONTHS_N[SV.month.getMonth()]+" "+SV.month.getFullYear()),
     h("button",{class:"btn sm",onclick:()=>{SV.month=new Date(SV.month.getFullYear(),SV.month.getMonth()+1,1);route()},"aria-label":"Επόμενος μήνας"},"›"),
-    h("button",{class:"btn sm",onclick:()=>{SV.month=null;route()}},"Σήμερα"),
+    h("button",{class:"btn sm",onclick:()=>{SV.month=null;SV.goToday=true;route()}},"Σήμερα"),
     h("div",{class:"sp"}),sel,
     h("div",{class:"seg"},["list","week"].map(k=>h("button",{class:SV.view===k?"on":"",onclick:()=>{SV.view=k;route()}},k==="list"?"Λίστα":"Εβδομάδες"))),
     h("button",{class:"btn sm",onclick:()=>printRange(a,z)},"Εκτύπωση μήνα"));
@@ -370,18 +371,20 @@ PAGE.schedule=async v=>{
   function draw(){
     const rs=rows.filter(r=>!SV.teacher||r.teacher===SV.teacher);box.replaceChildren();
     if(!rs.length){box.append(h("div",{class:"card empty"},rows.length?"Καμία εφημερία για αυτόν τον εκπαιδευτικό τον μήνα.":"Δεν υπάρχουν εφημερίες αυτόν τον μήνα. Δημιούργησε πρόγραμμα από την Παραγωγή."));return}
-    if(SV.view==="list"){let last="";rs.forEach(r=>{if(r.d!==last){last=r.d;box.append(h("div",{class:"day"},h("span",{class:r.d===S.today?"today":""},longDate(r.d)),r.d===S.today?h("small",{},"σήμερα"):null))}
+    if(SV.view==="list"){let last="";rs.forEach(r=>{if(r.d!==last){last=r.d;box.append(h("div",{class:"day","data-d":r.d},h("span",{class:r.d===S.today?"today":""},longDate(r.d)),r.d===S.today?h("small",{},"σήμερα"):null))}
       box.append(h("div",{class:"item card",style:"margin-bottom:6px;border-radius:12px;padding:10px 14px",onclick:()=>openAssign(r.id)},
         h("div",{style:"min-width:110px"},h("div",{class:"t"},r.interval),h("div",{class:"m"},r.start+"–"+r.end)),
         h("div",{style:"min-width:110px"},h("span",{class:"chip acc"},r.area)),h("div",{class:"sp t"},r.teacher),
-        r.locked?h("span",{class:"chip"},"κλειδωμένη"):null,r.replaced?h("span",{class:"chip warn"},"αντικατάσταση"):null))})}
+        stChip(r),r.replaced?h("span",{class:"chip warn"},"αντικατάσταση"):null))})}
     else{const weeks={};rs.forEach(r=>{const d=parse(r.d);const mon=new Date(d);mon.setDate(d.getDate()-((d.getDay()+6)%7));(weeks[iso(mon)]??=[]).push(r)});
       Object.keys(weeks).sort().forEach(m=>{const mon=parse(m);const fri=new Date(mon);fri.setDate(mon.getDate()+4);
-        box.append(h("div",{class:"day"},"Εβδομάδα "+fmt(m).slice(0,5)+" – "+fmt(iso(fri)).slice(0,5)));
+        box.append(h("div",{class:"day","data-d":iso(fri)},"Εβδομάδα "+fmt(m).slice(0,5)+" – "+fmt(iso(fri)).slice(0,5)));
         const w=h("div",{class:"week"});for(let i=0;i<5;i++){const d=new Date(mon);d.setDate(mon.getDate()+i);const ds=iso(d);
           const col=h("div",{class:"col"},h("h3",{class:ds===S.today?"today":""},DAYS[i]+" "+d.getDate()));
           weeks[m].filter(r=>r.d===ds).forEach(r=>col.append(h("div",{class:"cell"+(r.locked?" locked":"")+(r.replaced?" rep":""),onclick:()=>openAssign(r.id)},h("b",{},r.teacher),h("small",{},r.area+(S.mode==="daily"?"":" · "+r.interval)))));
           w.append(col)}box.append(w)})}
+    if(SV.goToday){SV.goToday=false;const t=[...box.querySelectorAll(".day[data-d]")].find(x=>x.dataset.d>=S.today);
+      if(t)setTimeout(()=>t.scrollIntoView({behavior:"smooth",block:"start"}),60);else toast("Δεν υπάρχουν άλλες εφημερίες αυτόν τον μήνα.")}
   }
   draw();
 };
@@ -398,7 +401,7 @@ async function openAssign(id){
       const el=h("div",{class:"cand"+(c.blocked?" blocked":""),onclick:()=>{if(c.blocked)return;pick=c.id;cl.querySelectorAll(".cand").forEach(x=>x.classList.remove("sel"));el.classList.add("sel");okBtn.disabled=false}},
         h("div",{class:"sp"},h("div",{class:"t"},c.name),h("div",{class:"m"},c.why)),h("span",{class:"chip"},c.load+"΄ συνολικά"));cl.append(el)});
     openDrawer(a.teacher,longDate(a.d)+" · "+a.interval+" "+a.start+"–"+a.end+" · "+a.area,[
-      h("div",{class:"row",style:"margin-bottom:10px"},a.locked?h("span",{class:"chip"},"κλειδωμένη / πραγματοποιημένη"):h("span",{class:"chip ok"},"προγραμματισμένη"),a.replaced?h("span",{class:"chip warn"},"αντικατάσταση από "+a.old_teacher):null),
+      h("div",{class:"row",style:"margin-bottom:10px"},a.d<S.today?h("span",{class:"chip ok"},"πραγματοποιήθηκε"):a.locked?h("span",{class:"chip"},"κλειδωμένη"):h("span",{class:"chip acc"},"προγραμματισμένη"),a.replaced?h("span",{class:"chip warn"},"αντικατάσταση από "+a.old_teacher):null),
       h("h2",{},"Αλλαγή εκπαιδευτικού"),h("p",{class:"m",style:"color:var(--muted);margin-top:-6px"},"Διάλεξε ποιος/α αναλαμβάνει. Η λίστα είναι ταξινομημένη με τον καλύτερο πρώτο."),
       cl,h("div",{class:"grid",style:"margin-top:12px"},h("label",{class:"f"},"Λόγος",reasonSel),h("label",{class:"f"},"Σημείωση",note),h("label",{class:"row",style:"cursor:pointer"},lock,"Κλείδωσε μετά την αλλαγή"))],
       [lockBtn,h("div",{class:"sp"}),h("button",{class:"btn",onclick:closeDrawer},"Άκυρο"),okBtn])})}

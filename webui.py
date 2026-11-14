@@ -301,6 +301,15 @@ class WebUI:
         app, db = self.app, self.db
         c = db.conn
         today = date.today()
+        # Ό,τι πέρασε (έως και χθες) θεωρείται πραγματοποιημένο: κλειδώνεται, ώστε να μετρά στα σύνολα και να μην
+        # αλλάξει σε επόμενη ανακατανομή. Κλειδώνονται μόνο οι ημέρες που πέρασαν από τον προηγούμενο έλεγχο, ώστε ένα
+        # χειροκίνητο «Ξεκλείδωμα» παλιάς εφημερίας (για διόρθωση) να μένει.
+        t = today.isoformat()
+        last = db.get_setting("past_locked_until", "")
+        if last != t:
+            c.execute("UPDATE assignments SET locked=1 WHERE d<? AND d>=? AND locked=0", (t, last))
+            db.set_setting("past_locked_until", t)
+            c.commit()
         teachers = db.active_teachers()
         n, mins = c.execute("SELECT COUNT(*), COALESCE(SUM(minutes),0) FROM assignments").fetchone()
         sums = {r[0]: int(r[1]) for r in c.execute("SELECT teacher_id, COALESCE(SUM(minutes),0) FROM assignments GROUP BY teacher_id")}
@@ -550,6 +559,8 @@ class WebUI:
                 raise
         if app._undo_snapshot() == snap:
             return {"ok": True, "changed": False, "text": app.generate_text.get("1.0", "end").strip(), "messages": cap.messages}
+        db.conn.execute("UPDATE assignments SET locked=1 WHERE d<? AND locked=0", (date.today().isoformat(),))
+        db.conn.commit()
         post = app._gen_metrics()
         app._undo_push("παραγωγή προγράμματος (νέα διεπαφή)", snap)
         app.refresh_all()
