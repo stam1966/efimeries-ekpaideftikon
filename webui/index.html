@@ -147,6 +147,17 @@ details>summary{cursor:pointer;font-weight:600;color:var(--muted)}
 .ribbon .rb i{font-style:normal;font-size:21px;line-height:24px;height:24px}.ribbon .rb:hover:not(:disabled){background:var(--panel2)}.ribbon .rb.on{background:var(--accent-soft);box-shadow:inset 0 -2px 0 var(--accent)}.ribbon .rb:disabled{opacity:.4;cursor:default}
 .ribbon .rsep{width:1px;background:var(--line);margin:4px 5px;flex:none}
 .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-bottom:18px}
+.fair{display:grid;grid-template-columns:minmax(110px,190px) 1fr;gap:5px 12px;align-items:center;position:relative}
+.fair .nm{font-size:13px;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text)}
+.fair .tr{position:relative;height:26px;cursor:pointer;border-radius:6px}
+.fair .tr:hover{background:var(--accent-soft)}
+.fair .bar{position:absolute;left:0;top:5px;bottom:5px;border-radius:5px;background:var(--accent);min-width:2px}
+.fair .bar.hi{background:#d98a1c}.fair .bar.lo{background:#7cb7d8}
+.fair .val{position:absolute;top:4px;font-size:12px;color:var(--muted);white-space:nowrap}
+.fair .mean{position:absolute;top:-4px;bottom:-4px;border-left:2px dashed var(--text);opacity:.55;pointer-events:none}
+.fair .ml{position:absolute;top:-20px;transform:translateX(-50%);font-size:11px;color:var(--muted);white-space:nowrap}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:12px}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-2px;margin-right:5px}
 .htile{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--panel);cursor:pointer;text-align:left;box-shadow:var(--shadow);transition:border-color .12s,transform .12s}
 .htile:hover{border-color:var(--accent);transform:translateY(-1px)}.htile i{font-style:normal;font-size:38px;line-height:44px}.htile b{font-size:15px}.htile span{font-size:12.5px;color:var(--muted);line-height:1.35}.htile em{font-style:normal;font-size:12px;color:var(--accent);font-weight:650}
 .htile.main{border-color:var(--accent);background:var(--accent-soft)}
@@ -223,9 +234,9 @@ function MENUS(){const ok=!!S;return [
    ["⏻ Έξοδος","",()=>{if(confirm("Να κλείσει η εφαρμογή;"))api("/api/quit",{}).then(()=>{document.body.innerHTML='<div style="padding:60px;text-align:center;font:16px system-ui">Η εφαρμογή έκλεισε.</div>'})}]]],
  ["Επεξεργασία",[["↶ Αναίρεση","",doUndo,ok&&!!S.can_undo],["-"],["👤 Νέος εκπαιδευτικός","",()=>{go("teachers");setTimeout(addTeacher,300)}],["🚫 Καταχώρηση απουσίας","",()=>go("absences")]]],
  ["Προβολή",PAGES.map(([k,l],i)=>[(cur===k?"✓":"")+"|"+(k==="home"||k==="appsettings"?"":i+". ")+PICON[k]+" "+l,"",()=>go(k)])],
- ["Πρόγραμμα",[["✨ Παραγωγή προγράμματος…","",()=>go("generate")],["📅 Πρόγραμμα","",()=>go("schedule")],["🖨 Εκτυπώσεις","",()=>go("reports")]]],
+ ["Πρόγραμμα",[["✨ Παραγωγή προγράμματος…","",()=>go("generate")],["📅 Πρόγραμμα","",()=>go("schedule")],["🔒 Κλείδωμα πραγματοποιημένων έως…","",lockUntil],["🖨 Εκτυπώσεις","",()=>go("reports")]]],
  ["Εργαλεία",[["🔄 Ενημέρωση από το Ωρολόγιο…","",()=>{ORO=true;goSet("timetable")}],["📥 Εισαγωγή ωρολογίου (aSc / Excel)","",()=>goSet("timetable")],
-   ...(ok&&S.sibling?[["📅 Ωρολόγιο Σχολείου ↗","",launchOrologio]]:[]),["-"],["🧰 Κλασική διεπαφή","",()=>classic("")],["⚙ Ρυθμίσεις εφαρμογής","",()=>goApp("app")]]],
+   ...(ok&&S.sibling?[["📅 Ωρολόγιο Σχολείου ↗","",launchOrologio]]:[]),["📄 Εισαγωγή / εξαγωγή CSV…","",()=>goApp("csv")],["-"],["⚙ Ρυθμίσεις εφαρμογής","",()=>goApp("app")]]],
  ["Βοήθεια",[["📖 Οδηγός χρήσης","",()=>guard(async()=>{await api("/api/guide",{})})],["🔎 Έλεγχος για νέα έκδοση","",()=>goApp("app")],["ℹ Σχετικά","",()=>openDrawer("Εφημερίες Εκπαιδευτικών","Έκδοση v"+(S?S.version+" · "+S.arch:""),h("p",{},"Πρόγραμμα εφημεριών εκπαιδευτικών. Λειτουργεί τοπικά· τα δεδομένα δεν φεύγουν από τον υπολογιστή ή τον κοινό φάκελο του σχολείου."),h("p",{},h("b",{},"Ιδέα και σχεδιασμός: Σταμάτης Κοκολόγος, εκπαιδευτικός ΠΕ70, 22ο Δημοτικό Σχολείο Λαμίας")),h("p",{class:"m",style:"color:var(--muted)"},"Μέλος της σουίτας «Σχολικές Εφαρμογές» μαζί με το Ωρολόγιο Σχολείου. Ελεύθερο λογισμικό, άδεια GNU GPL v3.0."),h("button",{class:"btn",onclick:closeDrawer},"Κλείσιμο"))]]]];}
 const PICON={home:"🏠",settings:"🏫",teachers:"👥",generate:"✨",schedule:"📅",reports:"🖨",absences:"🚫",appsettings:"⚙"};
 let MBO=-1,RIB=localStorage.getItem("ef.rib")||"home",RIBOFF=localStorage.getItem("ef.riboff")==="1";
@@ -253,6 +264,11 @@ function renderRibbon(){const r=$("#ribbon");r.classList.toggle("off",RIBOFF);if
     return h("button",{class:"rb"+(L.on?" on":""),disabled:!en,title:L.lab,onclick:()=>setTimeout(fn,0)},h("i",{"aria-hidden":"true"},L.ic),h("span",{},L.lab))}))}
 /* ---------------- Συρτάρι ---------------- */
 function openDrawer(title,sub,body,foot){$("#dTitle").textContent=title;$("#dSub").textContent=sub||"";$("#dBody").replaceChildren(...[].concat(body));$("#dFoot").replaceChildren(...[].concat(foot||[]));$("#drawer").classList.add("open");$("#bg").style.display="block"}
+function lockUntil(){const y=new Date();y.setDate(y.getDate()-1);const d=h("input",{type:"date",value:iso(y)});
+  openDrawer("Κλείδωμα πραγματοποιημένων","Όλες οι εφημερίες έως και την ημερομηνία κλειδώνονται ως πραγματοποιημένες: μετράνε στα σύνολα και δεν αλλάζουν σε επόμενη ανακατανομή.",
+    [h("label",{class:"f"},"Έως και",d)],
+    [h("div",{class:"sp"}),h("button",{class:"btn",onclick:closeDrawer},"Άκυρο"),h("button",{class:"btn pri",onclick:e=>guard(async()=>{if(!d.value)throw new Error("Διάλεξε ημερομηνία");
+      const r=await api("/api/lock/until",{date:d.value});closeDrawer();toast("Κλειδώθηκαν "+r.count+" εφημερίες");route()},e.currentTarget)},"Κλείδωμα")])}
 function closeDrawer(){$("#drawer").classList.remove("open");$("#bg").style.display="none"}
 $("#bg").onclick=closeDrawer;$("#dClose").onclick=closeDrawer;
 addEventListener("keydown",e=>{if(e.key==="Escape")closeDrawer()});
@@ -293,7 +309,8 @@ PAGE.home=async v=>{
     S.sibling?tile("🗓","Ωρολόγιο Σχολείου","Άνοιγμα της άλλης εφαρμογής της σουίτας.","↗",launchOrologio):null));
   v.append(h("div",{class:"grid g4",style:"margin-bottom:16px"},
     stat(S.teachers,"εκπαιδευτικοί στον κύκλο"),stat(S.assignments,"εφημερίες στο πρόγραμμα"),stat(MODES[S.mode]||S.mode,"τρόπος εφημερίας"),
-    stat(S.spread+"΄","διαφορά φόρτου (μεγαλύτερο – μικρότερο)")));
+    stat(hm(S.spread),"διαφορά φόρτου (μεγαλύτερο – μικρότερο)")));
+  if(S.fair&&S.fair.length)v.append(fairCard());
   const g=h("div",{class:"grid g2"});
   const c1=h("div",{class:"card"},h("h2",{},"Σήμερα"));
   if(todayRows.length)c1.append(list(todayRows,false));else c1.append(h("div",{class:"empty"},"Δεν υπάρχει εφημερία σήμερα."));
@@ -308,6 +325,22 @@ PAGE.home=async v=>{
     h("button",{class:"btn",onclick:()=>printRange(...monthRange(new Date()))},"Εκτύπωση τρέχοντος μήνα"),
     S.can_undo?h("button",{class:"btn",onclick:doUndo},"↶ Αναίρεση τελευταίας αλλαγής"):null)))
 };
+const hm=m=>{m=Math.round(m);const hh=Math.floor(m/60),mm=m%60;return hh?(hh+" ώρ."+(mm?" "+mm+"΄":"")):mm+"΄"};
+function fairCard(){
+  const D=S.fair,top=Math.max(...D.map(x=>x.minutes),1),mean=D.reduce((a,x)=>a+x.minutes,0)/D.length,scale=Math.max(top,mean)*1.12;
+  const card=h("div",{class:"card",style:"margin-bottom:16px"},h("h2",{},"Ισοκατανομή φόρτου"),
+    h("p",{class:"m",style:"color:var(--muted);margin-top:-4px"},"Συνολικός χρόνος εφημερίας κάθε εκπαιδευτικού στο σχολικό έτος. Πατήστε μια μπάρα για να δείτε το πρόγραμμά του."));
+  if(top<=1){card.append(h("div",{class:"empty"},"Δεν υπάρχει ακόμη πρόγραμμα εφημεριών."));return card}
+  const g=h("div",{class:"fair",style:"margin-top:26px"});
+  D.forEach((x,i)=>{const pct=100*x.minutes/scale,d=x.minutes-mean,cls=Math.abs(d)<=0.1*mean?"":(d>0?"hi":"lo");
+    const tr=h("div",{class:"tr",title:x.name+": "+hm(x.minutes)+" ("+(d>=0?"+":"−")+hm(Math.abs(d))+" από τον μέσο όρο)",onclick:()=>{SV.teacher=x.name;go("schedule")}},
+      h("div",{class:"bar "+cls,style:"width:"+pct+"%"}),h("span",{class:"val",style:"left:calc("+pct+"% + 6px)"},hm(x.minutes)));
+    if(i===0)tr.append(h("div",{class:"mean",style:"left:"+(100*mean/scale)+"%"},h("span",{class:"ml"},"μέσος όρος "+hm(mean))));
+    else tr.append(h("div",{class:"mean",style:"left:"+(100*mean/scale)+"%"}));
+    g.append(h("div",{class:"nm",title:x.name},x.name),tr)});
+  card.append(g,h("div",{class:"legend"},h("span",{},h("i",{style:"background:var(--accent)"}),"κοντά στον μέσο όρο (±10%)"),
+    h("span",{},h("i",{style:"background:#d98a1c"}),"πάνω από τον μέσο όρο"),h("span",{},h("i",{style:"background:#7cb7d8"}),"κάτω από τον μέσο όρο")));
+  return card}
 const stat=(n,l)=>h("div",{class:"card stat"},h("b",{},String(n)),h("span",{},l));
 function list(rows,withDate){const l=h("div",{class:"list"});rows.forEach(r=>l.append(h("div",{class:"item",onclick:()=>openAssign(r.id)},
   h("div",{style:"min-width:64px"},h("div",{class:"t"},withDate?fmt(r.d).slice(0,5):r.start),h("div",{class:"m"},withDate?r.weekday.slice(0,3):r.interval)),
@@ -377,7 +410,7 @@ PAGE.teachers=async v=>{
   const search=h("input",{type:"search",placeholder:"Αναζήτηση…",oninput:e=>{filter=e.target.value.toLowerCase();draw()}});
   const segp=h("div",{class:"seg"},...[["all","Όλοι"],["in","Συμμετέχουν"],["out","Εκτός εφημεριών"]].map(([k,l])=>h("button",{class:pf===k?"on":"",onclick:e=>{pf=TPF=k;segp.querySelectorAll("button").forEach(b=>b.classList.remove("on"));e.currentTarget.classList.add("on");draw()}},l)));
   v.append(h("div",{class:"row",style:"margin-bottom:12px;flex-wrap:wrap"},search,segp,h("div",{class:"sp"}),
-    h("button",{class:"btn",onclick:()=>classic("settings")},"Εισαγωγή ωρολογίου / CSV (κλασική)"),
+    h("button",{class:"btn",onclick:()=>goSet("timetable")},"Εισαγωγή από ωρολόγιο"),h("button",{class:"btn",onclick:()=>goApp("csv")},"Εισαγωγή CSV"),
     h("button",{class:"btn pri",onclick:addTeacher},"+ Νέος εκπαιδευτικός")));
   const card=h("div",{class:"card",style:"padding:6px 10px"});v.append(card);
   function draw(){
@@ -496,14 +529,24 @@ PAGE.generate=async v=>{
     else c.append(h("pre",{class:"out"},r.lines.join("\n")));out.replaceChildren(c)},btn)}
   draw()};
 /* ---------------- Περισσότερα ---------------- */
-async function classic(tab){await guard(async()=>{await api("/api/classic",{tab});toast("Ανοίχτηκε η κλασική διεπαφή στο παράθυρο της εφαρμογής.")})}
 const TAB={};
+TAB.csv=async v=>{
+  const out=h("div",{class:"m",style:"white-space:pre-wrap;margin-top:10px"});
+  async function up(kind,f,extra){if(!f)return;out.textContent="Εισαγωγή…";
+    await guard(async()=>{const r=await fetch("/api/csvimport/"+kind+(extra||""),{method:"POST",headers:{"X-Token":TOKEN,"Content-Type":"application/octet-stream"},body:f});
+      const j=await r.json();if(!r.ok)throw new Error(j.error||"Σφάλμα");out.textContent=(j.messages||[]).join("\n\n")||"Ολοκληρώθηκε.";toast("Η εισαγωγή ολοκληρώθηκε");S=await api("/api/state")})}
+  const pick=(kind,label,extra,confirmText)=>{const f=h("input",{type:"file",accept:".csv,text/csv",style:"display:none",onchange:e=>{const x=e.target.files[0];e.target.value="";if(x&&(!confirmText||confirm(confirmText)))up(kind,x,extra)}});
+    return h("span",{},f,h("button",{class:"btn",onclick:()=>f.click()},label))};
+  const dl=k=>window.open("/api/csv?"+q({kind:k,t:TOKEN}),"_blank");
+  v.append(h("div",{class:"card"},h("h2",{},"Εισαγωγή από CSV"),
+    h("p",{class:"m",style:"color:var(--muted);margin-top:-4px"},"Αρχεία CSV (διαχωριστικό ; ή ,  — UTF-8 ή ελληνικά Windows). Πριν από κάθε εισαγωγή κρατιέται αυτόματο αντίγραφο ασφαλείας και η αλλαγή αναιρείται με «Αναίρεση»."),
+    h("div",{class:"row",style:"flex-wrap:wrap"},pick("teachers","👥 Εκπαιδευτικοί…"),pick("exceptions","📆 Ειδικές ημέρες…"),
+      pick("schedule","📅 Πρόγραμμα (συγχώνευση)…"),pick("schedule","📅 Πρόγραμμα (αντικατάσταση)…","?replace=1","Θα διαγραφεί όλο το υπάρχον πρόγραμμα του σχολικού έτους και θα αντικατασταθεί από το αρχείο. Συνέχεια;")),out),
+    h("div",{class:"card",style:"margin-top:16px"},h("h2",{},"Εξαγωγή σε CSV"),
+    h("div",{class:"row",style:"flex-wrap:wrap"},h("button",{class:"btn",onclick:()=>dl("teachers")},"👥 Εκπαιδευτικοί"),h("button",{class:"btn",onclick:()=>dl("exceptions")},"📆 Ειδικές ημέρες"),h("button",{class:"btn",onclick:()=>dl("schedule")},"📅 Πρόγραμμα"))))};
 TAB.app=async v=>{
-  const tile=(t,d,tab,btn)=>h("div",{class:"card"},h("h2",{},t),h("p",{class:"m",style:"color:var(--muted);margin-top:-4px"},d),h("button",{class:"btn",onclick:()=>classic(tab)},btn||"Άνοιγμα στην κλασική διεπαφή"));
-  const lbl=h("label",{class:"row",style:"cursor:pointer"});const cbx=h("input",{type:"checkbox",onchange:e=>guard(async()=>{await api("/api/setting",{key:"ui_mode",value:e.target.checked?"web":"classic"});toast(e.target.checked?"Την επόμενη φορά η εφαρμογή θα ανοίγει με τη νέα διεπαφή.":"Η εφαρμογή θα ανοίγει με την κλασική διεπαφή.")})});cbx.checked=S.web_start;
-  lbl.append(cbx,"Εκκίνηση της εφαρμογής με τη νέα διεπαφή");
-  v.append(h("div",{class:"card",style:"margin-top:16px"},h("h2",{},"Εμφάνιση και εκκίνηση"),lbl,
-    h("div",{class:"row",style:"margin-top:12px"},h("span",{class:"m",style:"color:var(--muted)"},"Θέμα:"),h("div",{class:"seg"},[["auto","Αυτόματο"],["light","Φωτεινό"],["dark","Σκούρο"]].map(([k,l])=>h("button",{class:themeNow()===k?"on":"",onclick:async()=>{await setTheme(k);route()}},l))))));
+  v.append(h("div",{class:"card",style:"margin-top:16px"},h("h2",{},"Εμφάνιση"),
+    h("div",{class:"row"},h("span",{class:"m",style:"color:var(--muted)"},"Θέμα:"),h("div",{class:"seg"},[["auto","Αυτόματο"],["light","Φωτεινό"],["dark","Σκούρο"]].map(([k,l])=>h("button",{class:themeNow()===k?"on":"",onclick:async()=>{await setTheme(k);route()}},l))))));
   const ust=h("span",{class:"m",style:"color:var(--muted)"},"");
   const ubtn=h("button",{class:"btn",onclick:()=>guard(async()=>{ust.textContent="Έλεγχος…";const r=await api("/api/update/check",{});
     if(r.status==="error")ust.textContent="Δεν ήταν δυνατός ο έλεγχος. Ελέγξτε τη σύνδεση στο Internet.";
@@ -514,8 +557,6 @@ TAB.app=async v=>{
     h("div",{class:"row"},ubtn,ust),h("label",{class:"row",style:"cursor:pointer;margin-top:10px"},acb,"Αυτόματος έλεγχος για νέα έκδοση στην εκκίνηση (το πολύ μία φορά το 24ωρο)")));
   v.append(h("div",{class:"card",style:"margin-top:16px"},h("h2",{},"Πληροφορίες"),h("p",{class:"m",style:"margin:0;color:var(--muted)"},`Έκδοση v${S.version} (${S.arch}) · Φάκελος δεδομένων: ${S.data_dir}`),
     h("div",{class:"row",style:"margin-top:12px"},h("button",{class:"btn danger",onclick:()=>{if(confirm("Να κλείσει η εφαρμογή;"))api("/api/quit",{}).then(()=>{document.body.innerHTML='<div style="padding:60px;text-align:center;font:16px system-ui">Η εφαρμογή έκλεισε. Μπορείτε να κλείσετε αυτό το παράθυρο.</div>'}).catch(()=>{})}},"Έξοδος από την εφαρμογή"))));
-  v.append(h("div",{class:"card",style:"margin-top:16px"},h("h2",{},"Κλασική διεπαφή"),h("p",{class:"m",style:"color:var(--muted);margin-top:-4px"},"Όλες οι λειτουργίες υπάρχουν πλέον στη νέα διεπαφή. Η κλασική παραμένει διαθέσιμη ως εφεδρική επιλογή."),
-    h("div",{class:"row"},h("button",{class:"btn",id:"open-classic",onclick:()=>classic("")},"Άνοιγμα κλασικής διεπαφής"))))
 };
 
 /* ---------------- Εκτυπώσεις ---------------- */
@@ -678,7 +719,7 @@ async function editTeacherExtra(t){
 /* ---------------- Ρυθμίσεις ---------------- */
 let ST={tab:"school"};
 const SCHOOL_TABS=[["school","Σχολείο"],["year","Σχολικό έτος"],["areas","Τομείς"],["intervals","Χρονικές ζώνες"],["shifts","Βάρδιες"],["days","Ειδικές ημέρες"],["timetable","Ωρολόγιο"]];
-const APP_TABS=[["storage","Αποθήκευση"],["backup","Αντίγραφα ασφαλείας"],["app","Εφαρμογή και ενημερώσεις"]];
+const APP_TABS=[["storage","Αποθήκευση"],["backup","Αντίγραφα ασφαλείας"],["csv","Αρχεία CSV"],["app","Εφαρμογή και ενημερώσεις"]];
 let AT={tab:"storage"};
 PAGE.settings=async v=>{
   if(!SCHOOL_TABS.some(t=>t[0]===ST.tab))ST.tab="school";

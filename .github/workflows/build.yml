@@ -45,8 +45,8 @@ jobs:
         shell: cmd
         run: >
           python -m PyInstaller --noconfirm --clean --onedir --windowed
-          --icon app_icon.ico --add-data "app_icon.ico;." --add-data "sv_ttk;sv_ttk"
-          --hidden-import sv_ttk --hidden-import webui --hidden-import webui_assets --add-data "Odigos_Chrisis_Efimeries.pdf;."
+          --icon app_icon.ico --add-data "app_icon.ico;."
+          --hidden-import webui --hidden-import webui_assets --add-data "Odigos_Chrisis_Efimeries.pdf;."
           --name EfimeriesPortable_${{ matrix.arch }} app.py
 
       - name: Portable φάκελος (data / exports / backups / οδηγός)
@@ -55,6 +55,30 @@ jobs:
           Copy-Item app_icon.ico, Odigos_Chrisis_Efimeries.pdf, create_shortcut.bat $d
           # Για το portable zip: φάκελοι δεδομένων (ΔΕΝ μπαίνουν στο Setup.exe)
           New-Item -ItemType Directory -Force "$d/data/years","$d/exports","$d/backups" | Out-Null
+
+      - name: Δοκιμή εκκίνησης (server της διεπαφής, χωρίς παράθυρο)
+        run: |
+          $t = Join-Path $env:RUNNER_TEMP "eftest_${{ matrix.arch }}"
+          Copy-Item "dist/EfimeriesPortable_${{ matrix.arch }}" $t -Recurse
+          $env:EFIMERIES_WEB_NO_BROWSER = "1"
+          $env:APPDATA = Join-Path $env:RUNNER_TEMP "appdata_${{ matrix.arch }}"
+          $p = Start-Process "$t\EfimeriesPortable_${{ matrix.arch }}.exe" -PassThru
+          $url = $null
+          for ($i = 0; $i -lt 90; $i++) {
+            Start-Sleep 1
+            $f = "$env:APPDATA\SchoolApps\efimeries.url"
+            if (Test-Path $f) { $url = (Get-Content $f -Raw | ConvertFrom-Json).url; break }
+            if ($p.HasExited) { break }
+          }
+          if (-not $url) { Get-Content "$t\logs\*.log" -ErrorAction SilentlyContinue; throw "Η εφαρμογή δεν ξεκίνησε τον server της διεπαφής" }
+          $base = ($url -split '\?')[0].TrimEnd('/'); $tok = ($url -split 't=')[1]
+          $h = @{ "X-Token" = $tok }
+          $s = Invoke-RestMethod "$base/api/state" -Headers $h
+          Write-Host "Κατάσταση: $($s.school) · v$($s.version) · $($s.arch)"
+          $null = Invoke-WebRequest -UseBasicParsing "$base/?t=$tok"
+          Invoke-RestMethod "$base/api/quit" -Method Post -Headers $h -Body '{}' -ContentType 'application/json' | Out-Null
+          if (-not $p.WaitForExit(30000)) { $p.Kill(); throw "Η εφαρμογή δεν έκλεισε μετά το «Έξοδος»" }
+          Get-Content "$t\logs\*.log" -ErrorAction SilentlyContinue | Select-Object -Last 15
 
       - name: Setup.exe (Inno Setup)
         run: |

@@ -4,7 +4,7 @@
 
 [Code signing policy](CODE_SIGNING_POLICY.md) · Άδεια χρήσης: [GPL-3.0](LICENSE)
 
-Εφαρμογή Windows (Python / Tkinter / SQLite) για δημιουργία και διαχείριση προγράμματος εφημεριών εκπαιδευτικών.
+Εφαρμογή Windows (Python / SQLite, διεπαφή σε παράθυρο του Edge) για δημιουργία και διαχείριση προγράμματος εφημεριών εκπαιδευτικών.
 
 ## Λήψη
 

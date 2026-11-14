@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """Νέα διεπαφή «Εφημερίες Εκπαιδευτικών» (v0.60): τοπικός web server + σελίδα στον Edge.
 
-Η διεπαφή δουλεύει πάνω στην ΙΔΙΑ βάση και τον ΙΔΙΟ αλγόριθμο με την κλασική (Tkinter) εφαρμογή.
+Η μοναδική διεπαφή της εφαρμογής (από την 0.70 δεν υπάρχει πια κλασική διεπαφή Tkinter).
 Ο server ακούει μόνο στο 127.0.0.1 (δεν είναι ορατός από το δίκτυο) και ζητά μυστικό διακριτικό (token).
-Όλες οι κλήσεις εκτελούνται στο κύριο νήμα του Tk μέσω ουράς, ώστε να μη χρειάζεται κλείδωμα.
+Όλες οι κλήσεις εκτελούνται στο κύριο νήμα της εφαρμογής μέσω ουράς, ώστε να μη χρειάζεται κλείδωμα.
 """
 from __future__ import annotations
 
@@ -41,32 +41,24 @@ class ApiError(Exception):
 
 
 class _Captured:
-    """Αντικαθιστά προσωρινά τα messagebox ώστε να μη μπλοκάρει η κλήση σε κρυφό παράθυρο."""
+    """Συγκεντρώνει τα μηνύματα της λογικής (app.messagebox) για να επιστραφούν στη διεπαφή· οι ερωτήσεις απαντώνται «Ναι»."""
+    mod = None    # η μονάδα της εφαρμογής (app), ορίζεται από τη WebUI
 
     def __init__(self):
         self.messages: List[str] = []
+        self._mb = _Captured.mod or sys.modules.get("app") or sys.modules.get("__main__")
 
     def __enter__(self):
-        from tkinter import messagebox
-        self._mb = messagebox
-        self._saved = {k: getattr(messagebox, k) for k in ("showinfo", "showwarning", "showerror", "askyesno", "askokcancel", "askquestion")}
-
-        def note(title="", message="", *a, **k):
-            self.messages.append(f"{title}: {message}".strip(": "))
-            return None
-
-        def yes(title="", message="", *a, **k):
-            return True
-        for k in ("showinfo", "showwarning", "showerror"):
-            setattr(messagebox, k, note)
-        for k in ("askyesno", "askokcancel"):
-            setattr(messagebox, k, yes)
-        messagebox.askquestion = lambda *a, **k: "yes"
+        mb = getattr(self._mb, "messagebox", None)
+        self._prev = getattr(mb, "collector", None)
+        if mb is not None:
+            mb.collector = self.messages
         return self
 
     def __exit__(self, *exc):
-        for k, v in self._saved.items():
-            setattr(self._mb, k, v)
+        mb = getattr(self._mb, "messagebox", None)
+        if mb is not None:
+            mb.collector = self._prev
         return False
 
 
@@ -86,7 +78,9 @@ class WebUI:
     def __init__(self, app, hidden: bool = False):
         self.app = app
         self.mod = sys.modules[type(app).__module__]
-        self.hidden = hidden            # True: το παράθυρο Tk είναι κρυφό και η εφαρμογή κλείνει όταν κλείσει ο Edge
+        _Captured.mod = self.mod
+        self.hidden = True              # η εφαρμογή κλείνει όταν κλείσει το παράθυρο της διεπαφής
+        self._fallback_at = 0.0
         self.token = secrets.token_urlsafe(24)
         self.q: "queue.Queue" = queue.Queue()
         self.last_ping = 0.0
@@ -148,7 +142,7 @@ class WebUI:
                 body: Dict[str, Any] = {}
                 if method == "POST":
                     n = int(self.headers.get("Content-Length") or 0)
-                    is_raw = u.path.startswith(("/api/backup/", "/api/timetable/")) and (self.headers.get("Content-Type") or "").startswith("application/octet-stream")
+                    is_raw = u.path.startswith(("/api/backup/", "/api/timetable/", "/api/csvimport/")) and (self.headers.get("Content-Type") or "").startswith("application/octet-stream")
                     if n > (80_000_000 if is_raw else 2_000_000):
                         return self._json(413, {"error": "Το αρχείο είναι πολύ μεγάλο"})
                     raw = self.rfile.read(n) if n else b""
@@ -203,7 +197,8 @@ class WebUI:
         _t = threading.Timer(6.0, self.auto_check)
         _t.daemon = True
         _t.start()
-        return f"http://127.0.0.1:{self.port}/?t={self.token}"
+        self._url = f"http://127.0.0.1:{self.port}/?t={self.token}"
+        return self._url
 
     def stop(self):
         try:
@@ -249,9 +244,17 @@ class WebUI:
             return
         now = time.time()
         if self.hidden:
-            if self.last_ping == 0 and now - self.started > 45:
-                # ο Edge δεν άνοιξε: δείξε την κλασική εφαρμογή
-                self.show_classic()
+            if self.last_ping == 0 and not self._fallback_at and now - self.started > 45:
+                # ο Edge δεν άνοιξε: δοκιμή με τον προεπιλεγμένο browser
+                self._fallback_at = now
+                try:
+                    webbrowser.open(self._url)
+                except Exception:
+                    pass
+            elif self.last_ping == 0 and self._fallback_at and now - self._fallback_at > 600:
+                self._quit = True     # κανένα παράθυρο για 10 λεπτά: κλείσιμο
+                self.app._on_close()
+                return
             elif self.last_ping and (now - self.last_ping > 180 or (self.bye_at > self.last_ping and now - self.bye_at > 8)):
                 # 180΄΄: ο Edge περιορίζει τα χρονόμετρα σε κρυμμένο παράθυρο· το «αντίο» (pagehide) κλείνει πιο γρήγορα
                 self._quit = True
@@ -271,31 +274,6 @@ class WebUI:
         except Exception:
             pass
         webbrowser.open(url)
-
-    def show_classic(self, tab: str = "") -> None:
-        app = self.app
-        self.hidden = False
-        try:
-            app.deiconify()
-            if getattr(app, "_want_zoomed", False):
-                app._want_zoomed = False
-                app.state("zoomed")
-            app.lift()
-            app.focus_force()
-        except Exception:
-            pass
-        m = {"home": "tab_home", "settings": "tab_settings", "teachers": "tab_teachers", "generate": "tab_generate",
-             "schedule": "tab_schedule", "reports": "tab_reports", "areas": "tab_areas", "calendar": "tab_calendar",
-             "intervals": "tab_intervals", "shifts": "tab_shifts", "organisation": "tab_organisation"}
-        name = m.get(tab)
-        try:
-            if name in ("tab_areas", "tab_calendar", "tab_intervals", "tab_shifts"):
-                app.nb.select(app.tab_organisation)
-                app.org_nb.select(getattr(app, name))
-            elif name:
-                app.nb.select(getattr(app, name))
-        except Exception:
-            pass
 
     # ---------------------------------------------------------------- API
     def dispatch(self, path: str, method: str, p: dict, b: dict):
@@ -352,11 +330,11 @@ class WebUI:
             "teachers": len(teachers), "assignments": n, "spread": max(vals) - min(vals),
             "today": today.isoformat(), "upcoming": rows, "attention": attention,
             "data_dir": str(self.mod.STORAGE_ROOT),
-            "web_start": db.get_setting("ui_mode", "classic") == "web",
             "theme": db.get_setting("ui_theme", "auto"),
             "update": self.update_info(),
             "auto_update": self.app._update_state().get("auto", True) is not False,
             "can_undo": bool(app.__dict__.get("_undo_stack")),
+            "fair": sorted(({"name": t.name, "minutes": sums.get(t.id, 0)} for t in teachers), key=lambda x: (-x["minutes"], x["name"])),
         }
 
     def api_schedule(self, p, b):
@@ -1056,8 +1034,7 @@ class WebUI:
                 "teachers": c.execute("SELECT COUNT(*) FROM teachers").fetchone()[0], "assignments": c.execute("SELECT COUNT(*) FROM assignments").fetchone()[0]}
 
     def api_storage_browse(self, p, b):
-        from tkinter import filedialog
-        sel = filedialog.askdirectory(title="Επιλογή φακέλου κοινόχρηστων δεδομένων", initialdir=str(self.mod.STORAGE_ROOT))
+        sel = self.mod.pick_folder("Επιλογή φακέλου κοινόχρηστων δεδομένων", str(self.mod.STORAGE_ROOT))
         return {"path": sel or ""}
 
     def api_storage_set(self, p, b):
@@ -1109,6 +1086,11 @@ class WebUI:
         m = self.mod
         kind = p.get("kind", "schedule")
         stamp = datetime.now().strftime("%Y%m%d_%H%M")
+        if kind == "exceptions":
+            rows = self.db.conn.execute("SELECT d,end_d,label,type,config FROM exceptions ORDER BY d,end_d").fetchall()
+            out = [(r["d"], r["end_d"] or r["d"], r["label"], r["type"], r["config"] or "{}") for r in rows]
+            data = self._csv_bytes(["Από_ISO", "Έως_ISO", "Περιγραφή", "Τύπος", "config_json"], out)
+            return ("file", f"special_days_{self.db.get_setting('school_year')}_{stamp}.csv", data, "text/csv; charset=utf-8")
         if kind == "teachers":
             app = self.app
             out = []
@@ -1125,6 +1107,32 @@ class WebUI:
             out.append((r[0], m.fmt_date(r[0]), r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], int(r[9]), r[10], status))
         data = self._csv_bytes(["date_iso", "Ημερομηνία", "Ημέρα", "Χρόνος", "Από", "Έως", "Τομέας", "Εκπαιδευτικός", "Λεπτά", "Τρόπος", "locked", "entry_type", "Κατάσταση"], out)
         return ("file", f"program_{self.db.get_setting('school_year')}_{stamp}.csv", data, "text/csv; charset=utf-8")
+
+    def _csv_import(self, kind: str, b: dict) -> dict:
+        raw = b.get("_raw") or b""
+        if not raw:
+            raise ApiError("Το αρχείο είναι κενό")
+        app = self.app
+        snap = app._undo_snapshot()
+        with _Captured() as cap:
+            if kind == "teachers":
+                app.import_teachers_csv(raw)
+            elif kind == "exceptions":
+                app.import_exceptions_csv(raw)
+            else:
+                app.import_schedule_csv(raw, replace=kind == "schedule_replace")
+        changed = app._undo_snapshot() != snap
+        app.refresh_all()
+        return {"ok": True, "changed": changed, "messages": cap.messages}
+
+    def api_csvimport_teachers(self, p, b):
+        return self._csv_import("teachers", b)
+
+    def api_csvimport_exceptions(self, p, b):
+        return self._csv_import("exceptions", b)
+
+    def api_csvimport_schedule(self, p, b):
+        return self._csv_import("schedule_replace" if p.get("replace") == "1" else "schedule", b)
 
     def api_backup(self, p, b):
         sy = self.db.get_setting("school_year", self.app.active_school_year)
@@ -1403,7 +1411,19 @@ class WebUI:
         cmd = self.mod.orologio_launcher()
         if not cmd:
             raise ApiError("Το «Ωρολόγιο Σχολείου» δεν είναι εγκατεστημένο σε αυτόν τον υπολογιστή.")
-        subprocess.Popen(cmd, cwd=str(Path(cmd[-1]).parent.parent), close_fds=True)
+        # Οι Εφημερίες είναι πακέτο PyInstaller: ό,τι ορίζει για τις δικές του βιβλιοθήκες (φάκελος DLL, μεταβλητές
+        # περιβάλλοντος) περνά και στα προγράμματα που ξεκινά, και η Python του Ωρολογίου έκλεινε αμέσως.
+        env = {k: v for k, v in os.environ.items()
+               if not k.upper().startswith(("_MEI", "_PYI", "TCL_", "TK_", "PYTHON"))}
+        flags = 0
+        if sys.platform.startswith("win"):
+            try:
+                import ctypes
+                ctypes.windll.kernel32.SetDllDirectoryW(None)
+            except Exception:
+                pass
+            flags = 0x00000008 | 0x00000200      # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+        subprocess.Popen(cmd, cwd=str(Path(cmd[-1]).parent.parent), env=env, close_fds=True, creationflags=flags)
         return {"ok": True}
 
     def api_orologio_status(self, p, b):
@@ -1541,13 +1561,9 @@ class WebUI:
         return {"ok": True}
 
     # ---------------------------------------------------------------- λοιπά
-    def api_classic(self, p, b):
-        self.show_classic(str(b.get("tab") or ""))
-        return {"ok": True}
-
     def api_setting(self, p, b):
         key = b.get("key")
-        if key not in ("ui_mode", "ui_theme"):
+        if key not in ("ui_theme",):
             raise ApiError("Μη επιτρεπτή ρύθμιση")
         self.db.set_setting(key, str(b.get("value") or ""))
         return {"ok": True}
