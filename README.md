@@ -8,7 +8,7 @@
 
 ## Λήψη
 
-**Code signing policy:** free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org) (η αίτηση έχει υποβληθεί) — βλ. [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md), όπου και η πολιτική ιδιωτικότητας. Απεγκατάσταση: Ρυθμίσεις των Windows → Εφαρμογές (τα δεδομένα δεν σβήνονται).
+**Ψηφιακή υπογραφή:** οι εκδόσεις δεν έχουν ακόμη ψηφιακή υπογραφή (αν τα Windows δείξουν προειδοποίηση: «Περισσότερες πληροφορίες» → «Εκτέλεση οπωσδήποτε») — βλ. [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md), όπου και η πολιτική ιδιωτικότητας. Απεγκατάσταση: Ρυθμίσεις των Windows → Εφαρμογές (τα δεδομένα δεν σβήνονται).
 
 **Μόνιμοι σύνδεσμοι (δείχνουν πάντα στην τελευταία έκδοση, δεν αλλάζουν ποτέ):**
 - [Setup 64-bit](https://github.com/stam1966/efimeries-ekpaideftikon/releases/latest/download/Efimeries_Setup_x64.exe) (οι περισσότεροι υπολογιστές)
