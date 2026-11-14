@@ -488,7 +488,11 @@ PAGE.generate=async v=>{
   const st={mode:g.mode,scope:"continue",from:g.today<g.start?g.start:(g.today>g.end?g.start:g.today),to:g.end,stay:g.stay,w:{...g.weights}};
   v.append(h("h1",{},"Παραγωγή προγράμματος"),h("p",{class:"sub"},"Τρία απλά βήματα. Πριν από κάθε παραγωγή παίρνεται αυτόματο αντίγραφο ασφαλείας και μπορείς να επιστρέψεις στο προηγούμενο πρόγραμμα."));
   const out=h("div"),body=h("div",{class:"grid"});v.append(body,out);
-  function opt(sel,title,desc,on,extra){return h("div",{class:"opt"+(sel?" sel":""),onclick:on},h("input",{type:"radio",checked:sel}),h("div",{},h("b",{},title),h("span",{},desc),extra))}
+  function opt(sel,title,desc,on,extra){
+    // Κλικ μέσα στα πεδία της επιλεγμένης κάρτας (ημερομηνίες, κουμπιά) δεν πρέπει να ξαναχτίζουν την οθόνη:
+    // αλλιώς το ημερολόγιο του πεδίου ημερομηνίας κλείνει αμέσως.
+    if(extra)extra.addEventListener("click",e=>e.stopPropagation());
+    return h("div",{class:"opt"+(sel?" sel":""),onclick:()=>{if(!sel)on()}},h("input",{type:"radio",checked:sel}),h("div",{},h("b",{},title),h("span",{},desc),extra))}
   function draw(){
     const modeCard=h("div",{class:"card"},h("div",{class:"step"},h("div",{class:"num"},"1"),h("div",{style:"flex:1"},h("h2",{},"Τρόπος εφημερίας"),
       opt(st.mode==="daily","Ανά ημέρα","Ένας/μία εκπαιδευτικός κρατά την εφημερία όλης της ημέρας.",()=>{st.mode="daily";draw()}),
