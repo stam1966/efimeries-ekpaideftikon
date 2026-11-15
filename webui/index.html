@@ -153,6 +153,8 @@ details>summary{cursor:pointer;font-weight:600;color:var(--muted)}
 .fair .tr:hover{background:var(--accent-soft)}
 .fair .bar{position:absolute;left:0;top:5px;bottom:5px;border-radius:5px;background:var(--accent);min-width:2px}
 .fair .bar.hi{background:#d98a1c}.fair .bar.lo{background:#7cb7d8}
+.fair .bar.cr{background:repeating-linear-gradient(45deg,var(--accent) 0 3px,transparent 3px 7px);opacity:.75;border-radius:0 5px 5px 0}
+.fair .bar.cr.hi{background:repeating-linear-gradient(45deg,#d98a1c 0 3px,transparent 3px 7px)}.fair .bar.cr.lo{background:repeating-linear-gradient(45deg,#7cb7d8 0 3px,transparent 3px 7px)}
 .fair .val{position:absolute;top:4px;font-size:12px;color:var(--muted);white-space:nowrap}
 .fair .mean{position:absolute;top:-4px;bottom:-4px;border-left:2px dashed var(--text);opacity:.55;pointer-events:none}
 .fair .ml{position:absolute;top:-20px;transform:translateX(-50%);font-size:11px;color:var(--muted);white-space:nowrap}
@@ -327,19 +329,20 @@ PAGE.home=async v=>{
 };
 const hm=m=>{m=Math.round(m);const hh=Math.floor(m/60),mm=m%60;return hh?(hh+" ώρ."+(mm?" "+mm+"΄":"")):mm+"΄"};
 function fairCard(){
-  const D=S.fair,top=Math.max(...D.map(x=>x.minutes),1),mean=D.reduce((a,x)=>a+x.minutes,0)/D.length,scale=Math.max(top,mean)*1.12;
+  const D=S.fair,tot=x=>x.minutes+(x.credit||0),top=Math.max(...D.map(tot),1),mean=D.reduce((a,x)=>a+tot(x),0)/D.length,scale=Math.max(top,mean)*1.12;
   const card=h("div",{class:"card",style:"margin-bottom:16px"},h("h2",{},"Ισοκατανομή φόρτου"),
     h("p",{class:"m",style:"color:var(--muted);margin-top:-4px"},"Συνολικός χρόνος εφημερίας κάθε εκπαιδευτικού στο σχολικό έτος. Πατήστε μια μπάρα για να δείτε το πρόγραμμά του."));
   if(top<=1){card.append(h("div",{class:"empty"},"Δεν υπάρχει ακόμη πρόγραμμα εφημεριών."));return card}
   const g=h("div",{class:"fair",style:"margin-top:26px"});
-  D.forEach((x,i)=>{const pct=100*x.minutes/scale,d=x.minutes-mean,cls=Math.abs(d)<=0.1*mean?"":(d>0?"hi":"lo");
-    const tr=h("div",{class:"tr",title:x.name+": "+hm(x.minutes)+" ("+(d>=0?"+":"−")+hm(Math.abs(d))+" από τον μέσο όρο)",onclick:()=>{SV.teacher=x.name;go("schedule")}},
-      h("div",{class:"bar "+cls,style:"width:"+pct+"%"}),h("span",{class:"val",style:"left:calc("+pct+"% + 6px)"},hm(x.minutes)));
+  D.forEach((x,i)=>{const cr=x.credit||0,pct=100*tot(x)/scale,pr=100*x.minutes/scale,d=tot(x)-mean,cls=Math.abs(d)<=0.1*mean?"":(d>0?"hi":"lo");
+    const tr=h("div",{class:"tr",title:x.name+": "+hm(x.minutes)+(cr?" + "+hm(cr)+" μέσος όρος για ημέρες χωρίς αναπλήρωση":"")+" ("+(d>=0?"+":"−")+hm(Math.abs(d))+" από τον μέσο όρο)",onclick:()=>{SV.teacher=x.name;go("schedule")}},
+      h("div",{class:"bar "+cls,style:"width:"+pr+"%"}),cr?h("div",{class:"bar cr "+cls,style:"left:"+pr+"%;width:"+(pct-pr)+"%"}):null,h("span",{class:"val",style:"left:calc("+pct+"% + 6px)"},hm(tot(x))));
     if(i===0)tr.append(h("div",{class:"mean",style:"left:"+(100*mean/scale)+"%"},h("span",{class:"ml"},"μέσος όρος "+hm(mean))));
     else tr.append(h("div",{class:"mean",style:"left:"+(100*mean/scale)+"%"}));
     g.append(h("div",{class:"nm",title:x.name},x.name),tr)});
   card.append(g,h("div",{class:"legend"},h("span",{},h("i",{style:"background:var(--accent)"}),"κοντά στον μέσο όρο (±10%)"),
-    h("span",{},h("i",{style:"background:#d98a1c"}),"πάνω από τον μέσο όρο"),h("span",{},h("i",{style:"background:#7cb7d8"}),"κάτω από τον μέσο όρο")));
+    h("span",{},h("i",{style:"background:#d98a1c"}),"πάνω από τον μέσο όρο"),h("span",{},h("i",{style:"background:#7cb7d8"}),"κάτω από τον μέσο όρο"),
+    D.some(x=>x.credit)?h("span",{},h("i",{style:"background:repeating-linear-gradient(45deg,var(--muted) 0 3px,transparent 3px 7px)"}),"μέσος όρος για ημέρες χωρίς αναπλήρωση (μακροχρόνια άδεια, πριν/μετά την παρουσία στο σχολείο)"):null));
   return card}
 const stChip=r=>r.d<S.today?h("span",{class:"chip ok"},"πραγματοποιήθηκε"):(r.locked?h("span",{class:"chip"},"κλειδωμένη"):null);
 const stat=(n,l)=>h("div",{class:"card stat"},h("b",{},String(n)),h("span",{},l));
@@ -390,7 +393,11 @@ PAGE.schedule=async v=>{
 };
 async function openAssign(id){
   await guard(async()=>{
-    const {assignment:a,candidates}=await api("/api/candidates?id="+id);
+    const {assignment:a,candidates,swaps}=await api("/api/candidates?id="+id);
+    const swapBox=(swaps&&swaps.length)?h("div",{style:"margin-bottom:16px"},h("h2",{},"Εναλλαγή τομέα"),
+      h("p",{class:"m",style:"color:var(--muted);margin-top:-6px"},"Ανταλλαγή τομέα με συνάδελφο της ίδιας ημέρας και ζώνης, ώστε να μην κάνει κανείς συνεχώς τον ίδιο τομέα."),
+      h("div",{class:"row",style:"flex-wrap:wrap"},...swaps.map(x=>h("button",{class:"btn",onclick:e=>guard(async()=>{const r=await api("/api/swap/area",{id:a.id,other_id:x.id});toast("Εναλλαγή τομέα: "+r.msg);closeDrawer();route()},e.currentTarget)},
+        "⇄ "+x.teacher+" ("+x.area+")")))):null;
     let pick=null;const reasonSel=h("select",{},["Απουσία εκπαιδευτικού","Διόρθωση προγράμματος","Ανταλλαγή / αίτημα εκπαιδευτικού","Άλλος λόγος"].map(x=>h("option",{},x)));
     const note=h("input",{type:"text",placeholder:"Σημείωση (προαιρετικά)"});const lock=h("input",{type:"checkbox"});
     const okBtn=h("button",{class:"btn pri",disabled:true,onclick:()=>guard(async()=>{const r=await api("/api/replace",{id:a.id,new_id:pick,reason:reasonSel.value,note:note.value,lock:lock.checked});toast("Η αλλαγή καταγράφηκε: "+r.msg);closeDrawer();route()},okBtn)},"Αντικατάσταση");
@@ -402,7 +409,7 @@ async function openAssign(id){
         h("div",{class:"sp"},h("div",{class:"t"},c.name),h("div",{class:"m"},c.why)),h("span",{class:"chip"},c.load+"΄ συνολικά"));cl.append(el)});
     openDrawer(a.teacher,longDate(a.d)+" · "+a.interval+" "+a.start+"–"+a.end+" · "+a.area,[
       h("div",{class:"row",style:"margin-bottom:10px"},a.d<S.today?h("span",{class:"chip ok"},"πραγματοποιήθηκε"):a.locked?h("span",{class:"chip"},"κλειδωμένη"):h("span",{class:"chip acc"},"προγραμματισμένη"),a.replaced?h("span",{class:"chip warn"},"αντικατάσταση από "+a.old_teacher):null),
-      h("h2",{},"Αλλαγή εκπαιδευτικού"),h("p",{class:"m",style:"color:var(--muted);margin-top:-6px"},"Διάλεξε ποιος/α αναλαμβάνει. Η λίστα είναι ταξινομημένη με τον καλύτερο πρώτο."),
+      swapBox,h("h2",{},"Αλλαγή εκπαιδευτικού"),h("p",{class:"m",style:"color:var(--muted);margin-top:-6px"},"Διάλεξε ποιος/α αναλαμβάνει. Η λίστα είναι ταξινομημένη με τον καλύτερο πρώτο."),
       cl,h("div",{class:"grid",style:"margin-top:12px"},h("label",{class:"f"},"Λόγος",reasonSel),h("label",{class:"f"},"Σημείωση",note),h("label",{class:"row",style:"cursor:pointer"},lock,"Κλείδωσε μετά την αλλαγή"))],
       [lockBtn,h("div",{class:"sp"}),h("button",{class:"btn",onclick:closeDrawer},"Άκυρο"),okBtn])})}
 /* ---------------- Εκπαιδευτικοί ---------------- */
@@ -419,11 +426,12 @@ PAGE.teachers=async v=>{
   function draw(){
     const rows=data.filter(t=>(!filter||t.name.toLowerCase().includes(filter))&&(pf==="all"||(pf==="in")===!!t.participates));
     const tb=h("tbody");rows.forEach(t=>tb.append(h("tr",{class:"clk",onclick:()=>editTeacher(t)},
-      h("td",{},h("b",{},t.name),(!t.active||!t.participates)?h("span",{class:"chip",style:"margin-left:8px"},!t.active?"ανενεργός/ή":"εκτός εφημεριών"):null),
+      h("td",{},h("b",{},t.name),(!t.active||!t.participates)?h("span",{class:"chip",style:"margin-left:8px"},!t.active?"ανενεργός/ή":"εκτός εφημεριών"):null,
+        (t.date_from||t.date_to)?h("span",{class:"chip acc",style:"margin-left:8px"},(t.date_from?"από "+fmt(t.date_from):"")+(t.date_from&&t.date_to?" ":"")+(t.date_to?"έως "+fmt(t.date_to):"")):null),
       h("td",{},h("span",{class:"dots"},t.days.map((on,i)=>h("span",{class:"dot "+(i===t.primary?"pri":t.alternates.includes(i)?"alt":on?"on":""),title:DAYS[i]},D1[i])))),
       h("td",{},t.primary>=0?DAYS[t.primary]:"—"),h("td",{},t.alternates.length?t.alternates.map(i=>DAYS[i].slice(0,3)).join(", "):"—"),
       h("td",{style:"text-align:center",onclick:e=>e.stopPropagation()},(()=>{const c=h("input",{type:"checkbox",title:"Συμμετέχει στις εφημερίες",onchange:e=>guard(async()=>{await api("/api/teacher/participates",{id:t.id,on:e.target.checked});t.participates=e.target.checked?1:0;toast(t.name+(t.participates?": συμμετέχει στις εφημερίες":": εκτός εφημεριών")+". Για να εφαρμοστεί στο πρόγραμμα, κάντε νέα παραγωγή.",6000);draw()})});c.checked=!!t.participates;return c})()),
-      h("td",{style:"text-align:right"},t.count+" εφ. · "+t.minutes+"΄"))));
+      h("td",{style:"text-align:right"},t.count+" εφ. · "+t.minutes+"΄",t.credit?h("div",{class:"m",style:"color:var(--muted)",title:"Ημέρες χωρίς αναπλήρωση: λογαριάζεται ο μέσος όρος"},"+ "+t.credit+"΄ μ.ό."):null))));
     card.replaceChildren(rows.length?h("table",{},h("thead",{},h("tr",{},["Όνομα","Ημέρες","Κύρια","Εναλλακτικές","Εφημερίες","Φόρτος έτους"].map((x,i)=>h("th",{style:i===5?"text-align:right":i===4?"text-align:center":""},x)))),tb):h("div",{class:"empty"},"Δεν βρέθηκαν εκπαιδευτικοί."))}
   draw();
   const lg=h("p",{class:"m",style:"color:var(--muted);margin-top:10px"},"Υπόμνημα: ");
@@ -434,11 +442,15 @@ function addTeacher(){const inp=h("input",{type:"text",placeholder:"Επώνυμ
 function editTeacher(t){
   const st=JSON.parse(JSON.stringify(t));const name=h("input",{type:"text",value:t.name,style:"width:100%"});
   const notes=h("textarea",{rows:2,style:"width:100%"});notes.value=t.notes||"";
+  const dFrom=h("input",{type:"date",value:t.date_from||""}),dTo=h("input",{type:"date",value:t.date_to||""});
   const body=h("div");
   function draw(){
     body.replaceChildren(
       h("label",{class:"f"},"Ονοματεπώνυμο",name),
       h("div",{class:"row",style:"margin:14px 0 6px"},cb("Συμμετέχει στις εφημερίες",st.participates,v=>st.participates=v?1:0),cb("Ενεργός/ή",st.active,v=>st.active=v?1:0)),
+      h("h2",{style:"margin-top:16px"},"Στο σχολείο (προαιρετικό)"),
+      h("div",{class:"row"},h("label",{class:"f"},"Από",dFrom),h("label",{class:"f"},"Έως",dTo)),
+      h("p",{class:"m",style:"color:var(--muted)"},"Για αντικαταστάτη ή εκπαιδευτικό που έρχεται ή φεύγει μέσα στη χρονιά. Εκτός αυτού του διαστήματος δεν τοποθετείται σε εφημερία και λογαριάζεται ο μέσος όρος των συναδέλφων, ώστε να μη χρειαστεί να «καλύψει τη διαφορά». Κενό = όλη τη χρονιά."),
       h("h2",{style:"margin-top:16px"},"Ημέρες παρουσίας στο σχολείο"),
       h("div",{class:"row"},DAYS.map((d,i)=>h("button",{class:"btn sm"+(st.days[i]?" pri":""),onclick:()=>{st.days[i]=st.days[i]?0:1;if(!st.days[i]){if(st.primary===i)st.primary=-1;st.alternates=st.alternates.filter(x=>x!==i)}draw()}},d))),
       h("h2",{style:"margin-top:16px"},"Κύρια ημέρα εφημερίας"),
@@ -451,29 +463,39 @@ function editTeacher(t){
       h("div",{class:"row",style:"margin-top:16px"},h("button",{class:"btn",id:"t-extra",onclick:()=>editTeacherExtra(t)},"Διαθεσιμότητα ανά διάλειμμα και βάρδια…")))}
   function cb(l,v,f){const i=h("input",{type:"checkbox",onchange:e=>f(e.target.checked)});i.checked=!!v;return h("label",{class:"row",style:"cursor:pointer"},i,l)}
   draw();
-  openDrawer(t.name,"",body,[h("button",{class:"btn",onclick:closeDrawer},"Άκυρο"),h("button",{class:"btn pri",onclick:e=>guard(async()=>{st.name=name.value;st.notes=notes.value;await api("/api/teacher/save",st);closeDrawer();toast("Αποθηκεύτηκε");route()},e.target)},"Αποθήκευση")])}
+  openDrawer(t.name,"",body,[h("button",{class:"btn",onclick:closeDrawer},"Άκυρο"),h("button",{class:"btn pri",onclick:e=>guard(async()=>{st.name=name.value;st.notes=notes.value;const ch=(st.date_from||"")!==dFrom.value||(st.date_to||"")!==dTo.value;st.date_from=dFrom.value;st.date_to=dTo.value;await api("/api/teacher/save",st);closeDrawer();toast(ch?"Αποθηκεύτηκε · Για να ληφθεί υπόψη το «Στο σχολείο από – έως» στο υπόλοιπο πρόγραμμα: Παραγωγή → Ανακατανομή":"Αποθηκεύτηκε",ch?9000:3500);route()},e.target)},"Αποθήκευση")])}
 /* ---------------- Απουσίες ---------------- */
 PAGE.absences=async v=>{
   const [{teachers},{absences}]=await Promise.all([api("/api/teachers"),api("/api/absences")]);
   v.append(h("h1",{},"Απουσίες"),h("p",{class:"sub"},"Καταχώρησε απουσία και η εφαρμογή βρίσκει αυτόματα αντικαταστάτες για τις εφημερίες της περιόδου."));
-  const tsel=h("select",{},h("option",{value:""},"— Διάλεξε εκπαιδευτικό —"),...teachers.filter(t=>t.active).map(t=>h("option",{value:t.id},t.name)));
+  // Μόνο όσοι συμμετέχουν στις εφημερίες: οι υπόλοιποι (π.χ. από διάθεση) δεν έχουν εφημερίες να καλυφθούν.
+  const duty=teachers.filter(t=>t.active&&t.participates);
+  const tsel=h("select",{},h("option",{value:""},"— Διάλεξε εκπαιδευτικό —"),...duty.map(t=>h("option",{value:t.id},t.name)));
   const from=h("input",{type:"date",value:S.today}),to=h("input",{type:"date",value:S.today}),reason=h("input",{type:"text",placeholder:"Λόγος (προαιρετικά)"});
-  from.onchange=()=>{if(to.value<from.value)to.value=from.value};
   const rep=h("input",{type:"checkbox"});rep.checked=true;
+  const comp=h("input",{type:"checkbox"});comp.checked=true;let compTouched=false;comp.onchange=()=>{compTouched=true;compHint()};
+  const compInfo=h("div",{class:"m",style:"color:var(--muted);margin:4px 0 0 26px"});
+  let nDays=1,limit=5;
+  function compHint(){compInfo.textContent=(comp.checked?"Θα αναπληρώσει όταν επιστρέψει (έκτακτη/σύντομη απουσία).":"Δεν θα αναπληρώσει: για τις ημέρες αυτές λογαριάζεται ο μέσος όρος των συναδέλφων (μακροχρόνια άδεια).")+" · "+nDays+(nDays===1?" σχολική ημέρα":" σχολικές ημέρες")+(compTouched?"":" — προτείνεται αυτόματα: έως "+limit+" ημέρες «Αναπληρώνει»")}
+  async function compAuto(){try{const r=await api("/api/absence/default?"+q({from:from.value,to:to.value}));nDays=r.school_days;limit=r.limit;if(!compTouched)comp.checked=r.compensate}catch(e){}compHint()}
+  from.onchange=()=>{if(to.value<from.value)to.value=from.value;compAuto()};to.onchange=compAuto;compAuto();
   const btn=h("button",{class:"btn pri",onclick:()=>guard(async()=>{
     if(!tsel.value)throw new Error("Διάλεξε εκπαιδευτικό");
-    const r=await api("/api/absence/add",{teacher_id:+tsel.value,from:from.value,to:to.value,reason:reason.value,replace:rep.checked});
+    const r=await api("/api/absence/add",{teacher_id:+tsel.value,from:from.value,to:to.value,reason:reason.value,replace:rep.checked,compensate:comp.checked});
     toast(rep.checked?`Καταχωρήθηκε. Αντικαταστάθηκαν ${r.replaced} εφημερίες`+(r.missing.length?` · ${r.missing.length} χωρίς διαθέσιμο/η`:"")+(r.locked?` · ${r.locked} κλειδωμένες δεν άλλαξαν`:""):"Η απουσία καταχωρήθηκε",7000);route()},btn)},"Καταχώρηση απουσίας");
   v.append(h("div",{class:"card",style:"margin-bottom:16px"},h("div",{class:"grid g4"},h("label",{class:"f"},"Εκπαιδευτικός",tsel),h("label",{class:"f"},"Από",from),h("label",{class:"f"},"Έως",to),h("label",{class:"f"},"Λόγος",reason)),
-    h("div",{class:"row",style:"margin-top:14px"},h("label",{class:"row",style:"cursor:pointer"},rep,"Βρες αυτόματα αντικαταστάτες για τις εφημερίες της περιόδου"),h("div",{class:"sp"}),btn)));
-  const c=h("div",{class:"card",style:"padding:6px 10px"},absences.length?h("table",{},h("thead",{},h("tr",{},["Εκπαιδευτικός","Από","Έως","Λόγος",""].map(x=>h("th",{},x)))),h("tbody",{},...absences.slice().reverse().map(a=>h("tr",{},h("td",{},h("b",{},a.teacher)),h("td",{},fmt(a.from)),h("td",{},fmt(a.to)),h("td",{},a.reason),
+    h("div",{style:"margin-top:14px"},h("label",{class:"row",style:"cursor:pointer"},comp,h("b",{},"Αναπληρώνει τις εφημερίες που χάνει")),compInfo),
+    h("div",{class:"row",style:"margin-top:10px"},h("label",{class:"row",style:"cursor:pointer"},rep,"Βρες αυτόματα αντικαταστάτες για τις εφημερίες της περιόδου"),h("div",{class:"sp"}),btn)));
+  const c=h("div",{class:"card",style:"padding:6px 10px"},absences.length?h("table",{},h("thead",{},h("tr",{},["Εκπαιδευτικός","Από","Έως","Λόγος","Αναπληρώνει",""].map(x=>h("th",{},x)))),h("tbody",{},...absences.slice().reverse().map(a=>h("tr",{},h("td",{},h("b",{},a.teacher)),h("td",{},fmt(a.from)),h("td",{},fmt(a.to)),h("td",{},a.reason),
+    h("td",{},(()=>{const cb=h("input",{type:"checkbox",title:"Τσεκαρισμένο: αναπληρώνει όταν επιστρέψει. Χωρίς τσεκ: λογαριάζεται ο μέσος όρος για τις ημέρες της απουσίας.",onchange:e=>guard(async()=>{await api("/api/absence/compensate",{id:a.id,value:e.target.checked});
+      toast((e.target.checked?"Αναπληρώνει":"Δεν αναπληρώνει")+" · Για να ληφθεί υπόψη στο υπόλοιπο πρόγραμμα: Παραγωγή → Ανακατανομή από σήμερα",8000)})});cb.checked=!!a.compensate;return cb})()),
     h("td",{style:"text-align:right"},h("button",{class:"btn sm danger",onclick:()=>{if(confirm("Διαγραφή της απουσίας; (Οι εφημερίες που έχουν ήδη αλλάξει δεν επανέρχονται· μπορείς να χρησιμοποιήσεις «Αναίρεση» στην Αρχική.)"))guard(async()=>{await api("/api/absence/delete",{id:a.id});route()})}},"Διαγραφή")))))):h("div",{class:"empty"},"Δεν υπάρχουν καταχωρημένες απουσίες."));
   v.append(c);
   let OS=null;try{OS=await api("/api/orologio/status")}catch(e){}
   if(OS&&OS.absences.length){
     const sel={},tsel={};const dn=a=>fmt(a.from)+(a.to!==a.from?" – "+fmt(a.to):"");
     const rows=OS.absences.map(a=>{const cb=h("input",{type:"checkbox",onchange:e=>sel[a.key]=e.target.checked});cb.checked=sel[a.key]=a.full&&!!a.teacher_id;
-      const ts=h("select",{onchange:e=>tsel[a.key]=e.target.value},h("option",{value:""},"— εκπαιδευτικός —"),...teachers.filter(t=>t.active).map(t=>h("option",{value:t.id},t.name)));ts.value=a.teacher_id||"";
+      const ts=h("select",{onchange:e=>tsel[a.key]=e.target.value},h("option",{value:""},"— εκπαιδευτικός —"),...duty.map(t=>h("option",{value:t.id},t.name)));ts.value=a.teacher_id||"";
       return h("tr",{},h("td",{},cb),h("td",{},h("b",{},a.name)),h("td",{},ts),h("td",{},dn(a)),h("td",{},a.full?"όλη την ημέρα":"ώρες "+(a.periods||[]).join(", ")),h("td",{},a.reason||""))});
     const go2=(imp)=>guard(async()=>{const keys=Object.keys(sel).filter(k=>sel[k]);if(!keys.length)throw new Error("Επιλέξτε τουλάχιστον μία απουσία");
       const r=await api("/api/orologio/absences/import",imp?{keys,teachers:tsel,replace:true}:{skip:keys});

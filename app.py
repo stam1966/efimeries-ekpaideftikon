@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 APP_TITLE = "Εφημερίες Εκπαιδευτικών"
-APP_VERSION = "0.70.2"
+APP_VERSION = "0.71.0"
 UPDATE_REPO = "stam1966/efimeries-ekpaideftikon"  # αποθετήριο GitHub από όπου ελέγχονται οι νέες εκδόσεις
 
 # Όρια εργασίας του εβδομαδιαίου σχεδιασμού (προστατεύουν από πολύ αργούς υπολογισμούς σε μεγάλα σχολεία).
@@ -499,6 +499,8 @@ class Teacher:
     alternate_day: int = -1
     extra_cycle: int = 1
     notes: str = ""
+    date_from: str = ""     # «Στο σχολείο από» (π.χ. αντικαταστάτης)· κενό = από την αρχή του έτους
+    date_to: str = ""       # «Στο σχολείο έως»· κενό = έως το τέλος του έτους
 
     def available_on(self, weekday: int) -> bool:
         if weekday < 0 or weekday > 4:
@@ -693,6 +695,15 @@ class DB:
             cur.execute("ALTER TABLE teachers ADD COLUMN alternate_day INTEGER NOT NULL DEFAULT -1")
         if "extra_cycle" not in teacher_cols:
             cur.execute("ALTER TABLE teachers ADD COLUMN extra_cycle INTEGER NOT NULL DEFAULT 1")
+        if "date_from" not in teacher_cols:
+            cur.execute("ALTER TABLE teachers ADD COLUMN date_from TEXT NOT NULL DEFAULT ''")
+        if "date_to" not in teacher_cols:
+            cur.execute("ALTER TABLE teachers ADD COLUMN date_to TEXT NOT NULL DEFAULT ''")
+        absence_cols = [r[1] for r in cur.execute("PRAGMA table_info(absences)").fetchall()]
+        if "compensate" not in absence_cols:
+            # 1 = αναπληρώνει τις εφημερίες που χάνει (έκτακτη/σύντομη απουσία)
+            # 0 = δεν αναπληρώνει (μακροχρόνια άδεια): για τις ημέρες αυτές λογαριάζεται ο μέσος όρος
+            cur.execute("ALTER TABLE absences ADD COLUMN compensate INTEGER NOT NULL DEFAULT 1")
         cur.execute("""
             INSERT OR IGNORE INTO teacher_alternate_days(teacher_id,priority,weekday)
             SELECT id,1,alternate_day FROM teachers WHERE alternate_day BETWEEN 0 AND 4
@@ -1604,7 +1615,7 @@ class EfimeriesApp:
                          (teacher_id, d1.isoformat(), d2.isoformat())).fetchall()
         locked_n = c.execute("SELECT COUNT(*) FROM assignments WHERE teacher_id=? AND d BETWEEN ? AND ? AND locked=1",
                              (teacher_id, d1.isoformat(), d2.isoformat())).fetchone()[0]
-        sums = {r[0]: int(r[1]) for r in c.execute("SELECT teacher_id, COALESCE(SUM(minutes),0) FROM assignments GROUP BY teacher_id")}
+        sums = self.year_loads(teachers.values())
         for tid in teachers:
             sums.setdefault(tid, 0)
         busy: Dict[tuple, set] = {}
@@ -1663,11 +1674,93 @@ class EfimeriesApp:
             try:
                 for r in self.db.conn.execute("SELECT teacher_id,d_from,d_to FROM absences"):
                     m.setdefault(r[0], []).append((r[1], r[2]))
-            except sqlite3.Error:
+                # Εκτός του διαστήματος «Στο σχολείο από – έως» ο/η εκπαιδευτικός δεν είναι διαθέσιμος/η.
+                for tid, (lo, hi) in self._presence_spans().items():
+                    if lo:
+                        m.setdefault(tid, []).append(("0000-01-01", (parse_date(lo) - timedelta(days=1)).isoformat()))
+                    if hi:
+                        m.setdefault(tid, []).append(((parse_date(hi) + timedelta(days=1)).isoformat(), "9999-12-31"))
+            except (sqlite3.Error, ValueError):
                 pass
             cache = (id(self.db), m)
             self._absent_cache = cache
         return cache[1]
+
+    def _presence_spans(self) -> Dict[int, Tuple[str, str]]:
+        out: Dict[int, Tuple[str, str]] = {}
+        try:
+            for r in self.db.conn.execute("SELECT id,date_from,date_to FROM teachers WHERE COALESCE(date_from,'')<>'' OR COALESCE(date_to,'')<>''"):
+                out[r[0]] = (r[1] or "", r[2] or "")
+        except sqlite3.Error:
+            pass
+        return out
+
+    # ---- ημέρες χωρίς αναπλήρωση: συμψηφισμός με τον μέσο όρο (v0.71) --------------------------
+    def excused_days(self, teacher_ids) -> Dict[int, int]:
+        """Σχολικές ημέρες που ο/η εκπαιδευτικός δεν ήταν/δεν θα είναι στο σχολείο ΚΑΙ δεν αναπληρώνει:
+        απουσίες με «Δεν αναπληρώνει» και ημέρες εκτός του «Στο σχολείο από – έως»."""
+        ids = set(teacher_ids)
+        spans: Dict[int, list] = {}
+        try:
+            for r in self.db.conn.execute("SELECT teacher_id,d_from,d_to FROM absences WHERE compensate=0"):
+                if r[0] in ids:
+                    spans.setdefault(r[0], []).append((r[1], r[2]))
+        except sqlite3.Error:
+            pass
+        for tid, (lo, hi) in self._presence_spans().items():
+            if tid not in ids:
+                continue
+            try:
+                if lo:
+                    spans.setdefault(tid, []).append(("0000-01-01", (parse_date(lo) - timedelta(days=1)).isoformat()))
+                if hi:
+                    spans.setdefault(tid, []).append(((parse_date(hi) + timedelta(days=1)).isoformat(), "9999-12-31"))
+            except ValueError:
+                pass
+        if not spans:
+            return {tid: 0 for tid in ids}
+        days = [d.isoformat() for d in self.school_days()]
+        return {tid: (sum(1 for d in days if any(a <= d <= b for a, b in spans.get(tid, []))) if tid in spans else 0) for tid in ids}
+
+    def fair_credit(self, teachers, unit: str = "minutes") -> Dict[int, float]:
+        """Ό,τι λογαριάζεται σε κάθε εκπαιδευτικό για τις ημέρες χωρίς αναπλήρωση: ο μέσος όρος των συναδέλφων.
+        unit: "minutes" (λεπτά), "days" (ημέρες ημερήσιας εφημερίας), "extra" (πρόσθετες ημερήσιες εφημερίες),
+        "shifts" (αναθέσεις βάρδιας)."""
+        teachers = list(teachers)
+        n = len(teachers)
+        exc = self.excused_days([t.id for t in teachers])
+        if n == 0 or not any(exc.values()):
+            return {t.id: 0 for t in teachers}
+        k = max(1, len(self.db.areas(True)))
+        if unit == "days":
+            per_day = k / n
+        elif unit == "extra":
+            per_day = max(0.0, 5 * k - n) / (5.0 * n)
+        elif unit == "shifts":
+            c = self.db.conn
+            rows, dates = c.execute("SELECT COUNT(*), COUNT(DISTINCT d) FROM assignments WHERE mode='shifts'").fetchone()
+            per_day = (rows / dates / n) if dates else (max(1, len(self.db.shifts(True))) / n)
+        else:
+            try:
+                day_min = sum(minutes_between(r["start_time"], r["end_time"]) for r in self.db.intervals(True))
+            except Exception:
+                day_min = 0
+            if not day_min:
+                c = self.db.conn
+                tot, dates = c.execute("SELECT COALESCE(SUM(minutes),0), COUNT(DISTINCT d) FROM assignments").fetchone()
+                day_min = (tot / dates / k) if dates else 0
+            per_day = day_min * k / n
+        return {t.id: exc.get(t.id, 0) * per_day for t in teachers}
+
+    def year_loads(self, teachers=None) -> Dict[int, int]:
+        """Ετήσιο φορτίο (λεπτά) για σύγκριση δικαιοσύνης: πραγματικές εφημερίες + συμψηφισμός ημερών χωρίς αναπλήρωση."""
+        teachers = list(teachers) if teachers is not None else self.db.active_teachers()
+        sums = {r[0]: int(r[1]) for r in self.db.conn.execute("SELECT teacher_id, COALESCE(SUM(minutes),0) FROM assignments GROUP BY teacher_id")}
+        cr = self.fair_credit(teachers)
+        out = {t.id: sums.get(t.id, 0) + int(round(cr.get(t.id, 0))) for t in teachers}
+        for tid, v in sums.items():
+            out.setdefault(tid, v)
+        return out
 
     def _is_absent(self, teacher_id: int, d) -> bool:
         spans = self._absent_map().get(teacher_id)
@@ -1677,18 +1770,28 @@ class EfimeriesApp:
         return any(a <= ds <= b for a, b in spans)
 
     def _absence_rows(self, only_current: bool = False) -> list:
-        sql = "SELECT ab.id, ab.teacher_id, t.name AS teacher, ab.d_from, ab.d_to, ab.reason FROM absences ab JOIN teachers t ON t.id=ab.teacher_id"
+        sql = "SELECT ab.id, ab.teacher_id, t.name AS teacher, ab.d_from, ab.d_to, ab.reason, ab.compensate FROM absences ab JOIN teachers t ON t.id=ab.teacher_id"
         args: tuple = ()
         if only_current:
             sql += " WHERE ab.d_to>=?"
             args = (date.today().isoformat(),)
         return self.db.conn.execute(sql + " ORDER BY ab.d_from, t.name", args).fetchall()
 
-    def _add_absence(self, teacher_id: int, d1: date, d2: date, reason: str = "") -> int:
+    COMPENSATE_MAX_DAYS = 5     # έως τόσες σχολικές ημέρες: προτείνεται «Αναπληρώνει»
+
+    def default_compensate(self, d1: date, d2: date) -> bool:
         if d2 < d1:
             d1, d2 = d2, d1
-        cur = self.db.conn.execute("INSERT INTO absences(teacher_id,d_from,d_to,reason,created_at) VALUES(?,?,?,?,?)",
-                                   (teacher_id, d1.isoformat(), d2.isoformat(), reason, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        n = sum(1 for d in self.school_days() if d1 <= d <= d2)
+        return n <= self.COMPENSATE_MAX_DAYS
+
+    def _add_absence(self, teacher_id: int, d1: date, d2: date, reason: str = "", compensate: Optional[bool] = None) -> int:
+        if d2 < d1:
+            d1, d2 = d2, d1
+        if compensate is None:
+            compensate = self.default_compensate(d1, d2)
+        cur = self.db.conn.execute("INSERT INTO absences(teacher_id,d_from,d_to,reason,created_at,compensate) VALUES(?,?,?,?,?,?)",
+                                   (teacher_id, d1.isoformat(), d2.isoformat(), reason, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 1 if compensate else 0))
         self.db.conn.commit()
         self._absent_cache = None
         return cur.lastrowid
@@ -1701,7 +1804,7 @@ class EfimeriesApp:
     # ---- έλεγχος αποτελέσματος παραγωγής ----
     def _gen_metrics(self) -> dict:
         c = self.db.conn
-        sums = {r[0]: int(r[1]) for r in c.execute("SELECT teacher_id, COALESCE(SUM(minutes),0) FROM assignments GROUP BY teacher_id")}
+        sums = self.year_loads()
         vals = [sums.get(t.id, 0) for t in self.db.active_teachers()] or [0]
         keys = {(r[0], r[1], r[2], r[3], r[4]) for r in c.execute("SELECT d,interval_name,start_time,area_name,teacher_id FROM assignments")}
         return {"n": c.execute("SELECT COUNT(*) FROM assignments").fetchone()[0], "spread": max(vals) - min(vals), "keys": keys}
@@ -2163,6 +2266,71 @@ class EfimeriesApp:
     def mark_daily_area_used(self, teacher_id: int, area_names: List[str], next_daily_area: Dict[int, int]) -> None:
         if area_names:
             next_daily_area[teacher_id] = (next_daily_area.get(teacher_id, 0) + 1) % len(area_names)
+
+    def _rotate_areas(self, rows: list, mode: str) -> Tuple[list, int]:
+        """Εναλλαγή τομέων: στις εφημερίες της ίδιας ημέρας και ζώνης ανταλλάσσει τους εκπαιδευτικούς ανάμεσα στους
+        τομείς, ώστε κανείς να μην κάνει συνεχώς τον ίδιο τομέα. Δεν αλλάζει ποιος έχει εφημερία ποια ημέρα/ζώνη,
+        άρα ούτε τα σύνολα ούτε τη διαθεσιμότητα. Κριτήρια: να μην είναι ο ίδιος τομέας με την προηγούμενη εφημερία
+        του/της, και ισορροπία στο πόσες φορές έχει κάνει κάθε τομέα μέσα στη χρονιά."""
+        from itertools import permutations
+        AREA, TID = 5, 6
+        cnt: Dict[Tuple[int, str], int] = {}
+        last: Dict[int, str] = {}
+        hist = self.db.conn.execute("SELECT d, start_time, area_name, teacher_id FROM assignments ORDER BY d, start_time").fetchall()
+        groups: Dict[Tuple[str, str, str], List[int]] = {}
+        for i, r in enumerate(rows):
+            groups.setdefault((r[0], r[3], r[2]), []).append(i)
+        order = sorted(groups)
+        hi = 0
+        rows = list(rows)
+        changed = 0
+        allowed_cache: Dict[int, set] = {}
+
+        def allowed(tid: int, row) -> bool:
+            if mode != "shifts" or len(row) < 10 or not row[9]:
+                return True
+            if tid not in allowed_cache:
+                allowed_cache[tid] = self.db.teacher_shift_allowed_areas(tid)
+            al = allowed_cache[tid]
+            return (not al) or int(row[9]) in al
+
+        def note(tid: int, area: str) -> None:
+            cnt[(tid, area)] = cnt.get((tid, area), 0) + 1
+            last[tid] = area
+
+        for key in order:
+            while hi < len(hist) and (hist[hi][0], hist[hi][1]) < (key[0], key[1]):
+                note(int(hist[hi][3]), hist[hi][2] or "")
+                hi += 1
+            idx = groups[key]
+            areas = [rows[i][AREA] for i in idx]
+            tids = [rows[i][TID] for i in idx]
+            if len(idx) >= 2 and len(set(areas)) >= 2 and len(idx) <= 6:
+                def cost(perm) -> float:
+                    c = 0.0
+                    for pos, t in enumerate(perm):
+                        ar = areas[pos]
+                        c += 4.0 * (last.get(t) == ar) + cnt.get((t, ar), 0)
+                        c += 0.01 * (t != tids[pos])          # ισοβαθμία: μένει όπως ήταν
+                    return c
+                best, best_c = tuple(tids), cost(tids)
+                for perm in permutations(tids):
+                    if perm == best:
+                        continue
+                    if not all(allowed(t, rows[idx[pos]]) for pos, t in enumerate(perm)):
+                        continue
+                    cc = cost(perm)
+                    if cc < best_c - 1e-9:
+                        best, best_c = perm, cc
+                for pos, t in enumerate(best):
+                    if t != tids[pos]:
+                        r = list(rows[idx[pos]])
+                        r[TID] = t
+                        rows[idx[pos]] = tuple(r)
+                        changed += 1
+            for i in idx:
+                note(int(rows[i][TID]), rows[i][AREA] or "")
+        return rows, changed
 
     def balance_break_rows(
         self,
@@ -2730,6 +2898,8 @@ class EfimeriesApp:
         annual={t.id:0 for t in teachers}
         for r in self.db.conn.execute("SELECT teacher_id,COUNT(*) c FROM assignments WHERE mode='shifts' GROUP BY teacher_id").fetchall():
             if r["teacher_id"] in annual: annual[r["teacher_id"]]=int(r["c"])
+        for _tid, _cr in self.fair_credit(teachers, "shifts").items():
+            if _tid in annual: annual[_tid] += int(round(_cr))
         reserve_counts={t.id:0 for t in teachers}
         for r in self.db.conn.execute("SELECT teacher_id,COUNT(*) c FROM shift_reserves GROUP BY teacher_id").fetchall():
             if r["teacher_id"] in reserve_counts: reserve_counts[r["teacher_id"]]=int(r["c"])
@@ -2886,6 +3056,10 @@ class EfimeriesApp:
             ).fetchall()
         else:
             previous = []
+        # Ημέρες χωρίς αναπλήρωση (μακροχρόνια άδεια, πριν από την ανάληψη υπηρεσίας κ.λπ.): λογαριάζεται ο μέσος όρος,
+        # ώστε κανείς να μη «χρωστά» εφημερίες γι' αυτές.
+        for _tid, _cr in self.fair_credit(teachers, "minutes").items():
+            total_minutes[_tid] = total_minutes.get(_tid, 0) + int(round(_cr))
         for pr in previous:
             if pr["teacher_id"] in total_minutes:
                 total_minutes[pr["teacher_id"]] += int(pr["minutes"] or 0)
@@ -2901,6 +3075,10 @@ class EfimeriesApp:
 
         if mode == "daily":
             annual_days, extra_counts = self.daily_fairness_state(teachers)
+            _cd, _ce = self.fair_credit(teachers, "days"), self.fair_credit(teachers, "extra")
+            for _tid in annual_days:
+                annual_days[_tid] += int(round(_cd.get(_tid, 0)))
+                extra_counts[_tid] += int(round(_ce.get(_tid, 0)))
             daily_base_annual_days = dict(annual_days)
             weeks: Dict[Tuple[int, int], List[date]] = {}
             for d in target_days:
@@ -2975,6 +3153,13 @@ class EfimeriesApp:
             except Exception:
                 LOG.exception("Αποτυχία περάσματος «μείνε στη θέση σου»")
 
+        rotate_n = 0
+        if rows:
+            try:
+                rows, rotate_n = self._rotate_areas(rows, mode)
+            except Exception:
+                LOG.exception("Αποτυχία εναλλαγής τομέων")
+
         if mode == "shifts":
             self.db.conn.executemany(
                 "INSERT INTO assignments(d,weekday,interval_name,start_time,end_time,area_name,teacher_id,minutes,mode,area_id) VALUES(?,?,?,?,?,?,?,?,?,?)",
@@ -2995,6 +3180,8 @@ class EfimeriesApp:
         self.generate_text.insert("end", f"{action_text}\n")
         self.generate_text.insert("end", f"Διαγράφηκαν πριν την αναδημιουργία: {deleted} αναθέσεις.\n")
         self.generate_text.insert("end", f"Δημιουργήθηκαν: {len(rows)} αναθέσεις.\n")
+        if rotate_n:
+            self.generate_text.insert("end", f"Εναλλαγή τομέων: {rotate_n} αναθέσεις άλλαξαν τομέα, ώστε να μην κάνει κανείς συνεχώς τον ίδιο.\n")
         self.generate_text.insert("end", f"Τρόπος: { {'daily':'ημερήσια εφημερία','breaks':'ανά διάλειμμα','shifts':'ανά βάρδια / ζώνη'}.get(mode,mode) }\n")
         self.generate_text.insert("end", f"Διάστημα παραγωγής: {fmt_date(generate_from)} – {fmt_date(generate_to)}\n")
         if mode == "daily":
@@ -3283,7 +3470,7 @@ class EfimeriesApp:
         used = {r["teacher_id"] for r in c.execute(
             "SELECT teacher_id FROM assignments WHERE id<>? AND d=? AND interval_name=? AND start_time=? AND end_time=?",
             (a["id"], a["d"], a["interval_name"], a["start_time"], a["end_time"])).fetchall()}
-        loads = {r[0]: int(r[1] or 0) for r in c.execute("SELECT teacher_id, SUM(minutes) FROM assignments GROUP BY teacher_id").fetchall()}
+        loads = self.year_loads()
         interval_row = c.execute("SELECT id FROM duty_intervals WHERE name=? LIMIT 1", (a["interval_name"],)).fetchone()
         reserve_id = None
         if a["mode"] == "shifts":

@@ -313,7 +313,8 @@ class WebUI:
         teachers = db.active_teachers()
         n, mins = c.execute("SELECT COUNT(*), COALESCE(SUM(minutes),0) FROM assignments").fetchone()
         sums = {r[0]: int(r[1]) for r in c.execute("SELECT teacher_id, COALESCE(SUM(minutes),0) FROM assignments GROUP BY teacher_id")}
-        vals = [sums.get(t.id, 0) for t in teachers] or [0]
+        credit = {k: int(round(v)) for k, v in app.fair_credit(teachers).items()}
+        vals = [sums.get(t.id, 0) + credit.get(t.id, 0) for t in teachers] or [0]
         sql = app.SCHEDULE_SQL + " WHERE a.d BETWEEN ? AND ? ORDER BY a.d, a.start_time, display_area"
         rows = [self._row_dict(r) for r in c.execute(sql, (today.isoformat(), (today + timedelta(days=21)).isoformat())).fetchall()]
         attention = []
@@ -343,7 +344,7 @@ class WebUI:
             "update": self.update_info(),
             "auto_update": self.app._update_state().get("auto", True) is not False,
             "can_undo": bool(app.__dict__.get("_undo_stack")),
-            "fair": sorted(({"name": t.name, "minutes": sums.get(t.id, 0)} for t in teachers), key=lambda x: (-x["minutes"], x["name"])),
+            "fair": sorted(({"name": t.name, "minutes": sums.get(t.id, 0), "credit": credit.get(t.id, 0)} for t in teachers), key=lambda x: (-(x["minutes"] + x["credit"]), x["name"])),
         }
 
     def api_schedule(self, p, b):
@@ -359,7 +360,37 @@ class WebUI:
         out = []
         for x in app._change_candidates(a):
             out.append({"id": x["t"].id, "name": x["t"].name, "rank": x["rank"], "why": x["why"], "blocked": bool(x["blocked"]), "load": x["load"]})
-        return {"assignment": self._row_dict(a), "candidates": out}
+        # οι άλλες εφημερίες της ίδιας ημέρας και ζώνης σε άλλον τομέα: για «Εναλλαγή τομέα»
+        sib = app.db.conn.execute(app.SCHEDULE_SQL + " WHERE a.d=? AND a.start_time=? AND a.interval_name=? AND a.id<>? ORDER BY display_area",
+                                  (a["d"], a["start_time"], a["interval_name"], a["id"])).fetchall()
+        swaps = [{"id": r["id"], "teacher": r["teacher"], "area": r["display_area"] if "display_area" in r.keys() else r["area_name"]}
+                 for r in sib if r["teacher_id"] != a["teacher_id"] and (r["area_name"] or "") != (a["area_name"] or "")]
+        return {"assignment": self._row_dict(a), "candidates": out, "swaps": swaps}
+
+    def api_swap_area(self, p, b):
+        """Εναλλαγή τομέα ανάμεσα σε δύο εκπαιδευτικούς της ίδιας ημέρας και ζώνης (ανταλλάσσουν θέσεις)."""
+        app, c = self.app, self.db.conn
+        a = c.execute(app.SCHEDULE_SQL + " WHERE a.id=?", (int(b.get("id", 0)),)).fetchone()
+        o = c.execute(app.SCHEDULE_SQL + " WHERE a.id=?", (int(b.get("other_id", 0)),)).fetchone()
+        if not a or not o:
+            raise ApiError("Η εφημερία δεν βρέθηκε", 404)
+        if (a["d"], a["start_time"], a["interval_name"]) != (o["d"], o["start_time"], o["interval_name"]):
+            raise ApiError("Εναλλαγή τομέα γίνεται μόνο ανάμεσα σε εφημερίες της ίδιας ημέρας και ζώνης")
+        if a["mode"] == "shifts":
+            for t_id, row in ((a["teacher_id"], o), (o["teacher_id"], a)):
+                if row["area_id"] and not self.db.teacher_allowed_for_shift_area(t_id, row["area_id"]):
+                    raise ApiError("Ο/Η εκπαιδευτικός δεν επιτρέπεται να καλύψει τον τομέα «%s»" % row["area_name"])
+        snap = app._undo_snapshot()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        c.execute("UPDATE assignments SET teacher_id=? WHERE id=?", (o["teacher_id"], a["id"]))
+        c.execute("UPDATE assignments SET teacher_id=? WHERE id=?", (a["teacher_id"], o["id"]))
+        for row, old, new in ((a, a, o), (o, o, a)):
+            c.execute("""INSERT INTO duty_changes(assignment_id,changed_at,change_type,old_teacher_id,new_teacher_id,old_teacher_name,new_teacher_name,reason)
+                         VALUES(?,?,?,?,?,?,?,?)""", (row["id"], now, "Εναλλαγή τομέα", old["teacher_id"], new["teacher_id"], old["teacher"], new["teacher"],
+                                                      "Εναλλαγή τομέα ανάμεσα σε εκπαιδευτικούς της ίδιας ημέρας"))
+        c.commit()
+        app._undo_push("εναλλαγή τομέα", snap)
+        return {"ok": True, "msg": f"{a['teacher']} → {o['area_name']} · {o['teacher']} → {a['area_name']}"}
 
     def api_replace(self, p, b):
         app, c = self.app, self.db.conn
@@ -421,15 +452,17 @@ class WebUI:
         alts = self.db.teacher_alternate_days(t.id, getattr(t, "alternate_day", -1))
         return {"id": t.id, "name": t.name, "participates": int(t.participates), "active": int(t.active),
                 "days": [int(t.mon), int(t.tue), int(t.wed), int(t.thu), int(t.fri)], "primary": int(t.primary_day), "alternates": alts,
-                "extra_cycle": int(t.extra_cycle), "notes": t.notes or ""}
+                "extra_cycle": int(t.extra_cycle), "notes": t.notes or "", "date_from": t.date_from or "", "date_to": t.date_to or ""}
 
     def api_teachers(self, p, b):
         c = self.db.conn
         loads = {r[0]: (int(r[1]), int(r[2])) for r in c.execute("SELECT teacher_id, COALESCE(SUM(minutes),0), COUNT(*) FROM assignments GROUP BY teacher_id")}
         out = []
+        credit = self.app.fair_credit(self.db.active_teachers())
         for t in self.db.teachers():
             d = self._teacher_dict(t)
             d["minutes"], d["count"] = loads.get(t.id, (0, 0))
+            d["credit"] = int(round(credit.get(t.id, 0)))
             out.append(d)
         return {"teachers": out}
 
@@ -447,9 +480,16 @@ class WebUI:
         name = str(b.get("name") or "").strip()
         if not name:
             raise ApiError("Το όνομα δεν μπορεί να είναι κενό")
+        cur_t = c.execute("SELECT date_from,date_to FROM teachers WHERE id=?", (tid,)).fetchone()
+        df = b.get("date_from", cur_t[0]) or ""
+        dt = b.get("date_to", cur_t[1]) or ""
+        df = self._d(df).isoformat() if df else ""
+        dt = self._d(dt).isoformat() if dt else ""
+        if df and dt and dt < df:
+            raise ApiError("Το «έως» είναι πριν από το «από»")
         try:
-            c.execute("UPDATE teachers SET name=?, participates=?, active=?, mon=?, tue=?, wed=?, thu=?, fri=?, primary_day=?, extra_cycle=?, notes=? WHERE id=?",
-                      (name, 1 if b.get("participates", 1) else 0, 1 if b.get("active", 1) else 0, *days, primary, 1 if b.get("extra_cycle", 1) else 0, str(b.get("notes") or ""), tid))
+            c.execute("UPDATE teachers SET name=?, participates=?, active=?, mon=?, tue=?, wed=?, thu=?, fri=?, primary_day=?, extra_cycle=?, notes=?, date_from=?, date_to=? WHERE id=?",
+                      (name, 1 if b.get("participates", 1) else 0, 1 if b.get("active", 1) else 0, *days, primary, 1 if b.get("extra_cycle", 1) else 0, str(b.get("notes") or ""), df, dt, tid))
             app._set_alternates_nocommit(tid, alts)
             c.commit()
         except Exception as e:  # noqa: BLE001
@@ -490,7 +530,23 @@ class WebUI:
     # ------------------------------------------------------------------ απουσίες
     def api_absences(self, p, b):
         rows = self.app._absence_rows()
-        return {"absences": [{"id": r["id"], "teacher_id": r["teacher_id"], "teacher": r["teacher"], "from": r["d_from"], "to": r["d_to"], "reason": r["reason"] or ""} for r in rows]}
+        return {"absences": [{"id": r["id"], "teacher_id": r["teacher_id"], "teacher": r["teacher"], "from": r["d_from"], "to": r["d_to"], "reason": r["reason"] or "", "compensate": int(r["compensate"])} for r in rows]}
+
+    def api_absence_compensate(self, p, b):
+        app, c = self.app, self.db.conn
+        aid = int(b.get("id", 0))
+        if not c.execute("SELECT 1 FROM absences WHERE id=?", (aid,)).fetchone():
+            raise ApiError("Η απουσία δεν βρέθηκε", 404)
+        snap = app._undo_snapshot()
+        c.execute("UPDATE absences SET compensate=? WHERE id=?", (1 if b.get("value") else 0, aid))
+        c.commit()
+        app._undo_push("αλλαγή αναπλήρωσης απουσίας", snap)
+        return {"ok": True}
+
+    def api_absence_default(self, p, b):
+        d1, d2 = self._d(p.get("from", "")), self._d(p.get("to", "") or p.get("from", ""))
+        n = sum(1 for d in self.app.school_days() if min(d1, d2) <= d <= max(d1, d2))
+        return {"school_days": n, "compensate": n <= self.app.COMPENSATE_MAX_DAYS, "limit": self.app.COMPENSATE_MAX_DAYS}
 
     def api_absence_add(self, p, b):
         app, c = self.app, self.db.conn
@@ -500,7 +556,8 @@ class WebUI:
         if not c.execute("SELECT 1 FROM teachers WHERE id=?", (tid,)).fetchone():
             raise ApiError("Διάλεξε εκπαιδευτικό")
         snap = app._undo_snapshot()
-        app._add_absence(tid, d1, d2, reason)
+        comp = b.get("compensate")
+        app._add_absence(tid, d1, d2, reason, None if comp is None else bool(comp))
         done, missing, locked_n = 0, [], 0
         if b.get("replace", True):
             if d2 < d1:
