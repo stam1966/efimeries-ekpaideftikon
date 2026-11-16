@@ -802,19 +802,32 @@ TAB.storage=async v=>{
   const s=await api("/api/storage");
   try{const O=await api("/api/orologio/status");if(O.suite){v.append(h("div",{class:"alert"},"ℹ Ο υπολογιστής ανήκει στη σουίτα «Σχολικές Εφαρμογές» με κοινό φάκελο "+O.suite+". Τα δεδομένα των Εφημεριών είναι στον υποφάκελο «Εφημερίες»· ο φάκελος αλλάζει από το «Ωρολόγιο Σχολείου» → Ρυθμίσεις εφαρμογής → Κοινή χρήση."));return}}catch(e){}
   const inp=h("input",{type:"text",value:"",placeholder:String.raw`π.χ. \\server\koinos\Efimeries  ή  D:\Efimeries`,style:"flex:1;min-width:280px"});
-  let copy=true;
-  const copyBox=h("div",{class:"hide",style:"margin-top:12px"});
-  function drawCopy(){copyBox.replaceChildren(
-    h("div",{class:"opt"+(copy?" sel":""),onclick:()=>{copy=true;drawCopy()}},h("input",{type:"radio",checked:copy}),h("div",{},h("b",{},"Αντιγραφή των τρεχόντων δεδομένων στον νέο φάκελο"),h("span",{},"Επίλεξέ το όταν ρυθμίζεις τον κοινόχρηστο φάκελο για πρώτη φορά, από τον υπολογιστή που έχει ήδη τα δεδομένα."))),
-    h("div",{class:"opt"+(!copy?" sel":""),onclick:()=>{copy=false;drawCopy()}},h("input",{type:"radio",checked:!copy}),h("div",{},h("b",{},"Χρήση των δεδομένων που υπάρχουν ήδη στον φάκελο"),h("span",{},"Επίλεξέ το στον δεύτερο υπολογιστή, αφού ο κοινός φάκελος έχει ήδη τα δεδομένα."))))}
-  drawCopy();
-  const apply=h("button",{class:"btn pri",onclick:e=>guard(async()=>{
-    if(!inp.value.trim())throw new Error("Γράψε ή επίλεξε φάκελο");
-    if(!confirm("Η εφαρμογή θα χρησιμοποιεί από τώρα τον φάκελο:\n"+inp.value+"\n"+(copy?"Τα τρέχοντα δεδομένα θα αντιγραφούν εκεί.":"Θα χρησιμοποιηθούν τα δεδομένα που υπάρχουν ήδη εκεί.")+"\n\nΝα συνεχίσω;"))return;
-    const r=await api("/api/storage/set",{path:inp.value,copy});toast(r.changed?"Ο φάκελος δεδομένων άλλαξε.":"Δεν έγινε αλλαγή.");
-    if(r.messages&&r.messages.length)alert(r.messages.join("\n\n"));route()},e.currentTarget)},"Εφαρμογή φακέλου");
-  const browse=h("button",{class:"btn",onclick:e=>guard(async()=>{const r=await api("/api/storage/browse",{});if(r.path){inp.value=r.path.replace(/\//g,"\\");copyBox.classList.remove("hide")}},e.currentTarget)},"Αναζήτηση…");
-  inp.oninput=()=>copyBox.classList.toggle("hide",!inp.value.trim());
+  const res=h("div",{style:"margin-top:12px"});
+  let tmr=null;
+  async function check(){const path=inp.value.trim();res.replaceChildren();if(!path)return;
+    res.append(h("div",{class:"m",style:"color:var(--muted)"},"Έλεγχος φακέλου…"));
+    let r;try{r=await api("/api/storage/inspect",{path})}catch(e){res.replaceChildren(h("div",{class:"alert bad"},e.message));return}
+    if(inp.value.trim()!==path)return;
+    const box=[];
+    if(!r.exists){res.replaceChildren(h("div",{class:"alert bad"},"Ο φάκελος δεν βρέθηκε ή δεν είναι προσβάσιμος από αυτόν τον υπολογιστή. Ελέγξτε τη διαδρομή (π.χ. \\\\ΥΠΟΛΟΓΙΣΤΗΣ\\Κοινόχρηστος) και ότι τα Windows έχουν πρόσβαση: ανοίξτε την πρώτα στην Εξερεύνηση αρχείων· αν ζητήσει όνομα χρήστη και κωδικό του άλλου υπολογιστή, δώστε τα και τσεκάρετε «Απομνημόνευση»."));return}
+    if(r.same){res.replaceChildren(h("div",{class:"alert"},"Αυτός ο φάκελος χρησιμοποιείται ήδη από την εφαρμογή."));return}
+    if(r.has_data){
+      box.push(h("div",{class:"alert ok"},"✓ Βρέθηκαν δεδομένα Εφημεριών"+(r.root!==r.path?" (στον υποφάκελο "+r.root+")":"")+": "+(r.school?r.school+" · ":"")+"σχολικό έτος "+r.year+" · "+r.teachers+" εκπαιδευτικοί · "+r.assignments+" εφημερίες."));
+      if(r.locked_by)box.push(h("div",{class:"alert warn"},"⚠ Οι Εφημερίες είναι ανοιχτές αυτή τη στιγμή στον υπολογιστή «"+r.locked_by+"». Ανοίγουν σε έναν υπολογιστή κάθε φορά: κλείστε τις εκεί πριν τις ανοίξετε εδώ."));
+      if(!r.writable)box.push(h("div",{class:"alert bad"},"Ο φάκελος δεν επιτρέπει εγγραφή από αυτόν τον υπολογιστή. Στον πρώτο υπολογιστή δώστε δικαίωμα «Ανάγνωση/Εγγραφή» στην κοινή χρήση."));
+      box.push(h("div",{class:"row",style:"margin-top:10px"},h("button",{class:"btn pri",disabled:!r.writable,onclick:e=>apply(e,false)},"Χρήση αυτών των δεδομένων")));
+    }else{
+      box.push(h("div",{class:"alert warn"},"Ο φάκελος δεν έχει δεδομένα Εφημεριών."+(r.root!==r.path?" Θα χρησιμοποιηθεί ο υποφάκελος "+r.root+".":"")));
+      box.push(h("p",{class:"m",style:"color:var(--muted)"},"• Αν αυτός είναι ο ΠΡΩΤΟΣ υπολογιστής (εδώ είναι τα δεδομένα σας): αντιγράψτε τα στον κοινό φάκελο.",h("br"),"• Αν είναι ο ΔΕΥΤΕΡΟΣ: μάλλον δείξατε άλλον φάκελο — δείξτε τον ίδιο φάκελο που επιλέξατε στον πρώτο υπολογιστή."));
+      if(!r.writable)box.push(h("div",{class:"alert bad"},"Ο φάκελος δεν επιτρέπει εγγραφή από αυτόν τον υπολογιστή."));
+      box.push(h("div",{class:"row",style:"margin-top:10px"},h("button",{class:"btn pri",disabled:!r.writable,onclick:e=>apply(e,true)},"Αντιγραφή των δεδομένων αυτού του υπολογιστή εκεί")));
+    }
+    res.replaceChildren(...box)}
+  async function apply(e,copy){await guard(async()=>{
+    const r=await api("/api/storage/set",{path:inp.value.trim(),copy});toast(r.changed?"Ο φάκελος δεδομένων άλλαξε.":"Δεν έγινε αλλαγή.");
+    if(r.messages&&r.messages.length)alert(r.messages.join("\n\n"));S=await api("/api/state");route()},e.currentTarget)}
+  const browse=h("button",{class:"btn",onclick:e=>guard(async()=>{const r=await api("/api/storage/browse",{});if(r.path){inp.value=r.path.replace(/\//g,"\\");check()}},e.currentTarget)},"Αναζήτηση…");
+  inp.oninput=()=>{clearTimeout(tmr);tmr=setTimeout(check,500)};
   v.append(h("div",{class:"card"},h("h2",{},"Πού αποθηκεύονται τα δεδομένα"),
     h("p",{style:"margin:0 0 4px"},h("b",{},s.root)),
     h("p",{class:"m",style:"color:var(--muted);margin:0"},(s.local?"Τοπικός φάκελος της εφαρμογής":"Φάκελος εκτός της εφαρμογής (π.χ. κοινόχρηστος)")+" · "+s.teachers+" εκπαιδευτικοί · "+s.assignments+" εφημερίες"),
@@ -822,10 +835,10 @@ TAB.storage=async v=>{
     );
   v.append(h("div",{class:"card",style:"margin-top:16px"},h("h2",{},"Χρήση από δύο υπολογιστές (κοινόχρηστος φάκελος)"),
     h("p",{class:"m",style:"color:var(--muted);margin-top:-4px"},"Αν η εφαρμογή τρέχει σε δύο υπολογιστές του ίδιου δικτύου, και οι δύο πρέπει να δείχνουν στον ΙΔΙΟ φάκελο δικτύου. Δεν πρέπει να είναι ανοιχτοί ταυτόχρονα: ο δεύτερος θα ειδοποιηθεί ότι ο φάκελος χρησιμοποιείται."),
-    h("div",{class:"row"},inp,browse),copyBox,h("div",{class:"row",style:"margin-top:14px"},apply)));
+    h("div",{class:"row"},inp,browse),res));
   v.append(h("div",{class:"card",style:"margin-top:16px"},h("h2",{},"Οδηγίες"),h("ol",{style:"margin:0;padding-left:20px;color:var(--muted)"},
-    h("li",{},"Στον πρώτο υπολογιστή: διάλεξε τον κοινόχρηστο φάκελο και «Αντιγραφή των τρεχόντων δεδομένων»."),
-    h("li",{},"Στον δεύτερο υπολογιστή: διάλεξε τον ΙΔΙΟ φάκελο και «Χρήση των δεδομένων που υπάρχουν ήδη»."),
+    h("li",{},"Στον πρώτο υπολογιστή: γράψε ή διάλεξε τον κοινόχρηστο φάκελο και «Αντιγραφή των δεδομένων αυτού του υπολογιστή εκεί»."),
+    h("li",{},"Στον δεύτερο υπολογιστή: τον ΙΔΙΟ φάκελο (π.χ. \\\\ΥΠΟΛΟΓΙΣΤΗΣ\\Κοινόχρηστος)· η εφαρμογή δείχνει τι βρήκε και πατάς «Χρήση αυτών των δεδομένων»."),
     h("li",{},"Από εκεί και πέρα εργάζεστε εναλλάξ· δεν χρειάζεται καμία άλλη ρύθμιση."))))};
 TAB.areas=async v=>{
   const {areas}=await api("/api/areas");

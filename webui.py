@@ -1105,6 +1105,18 @@ class WebUI:
         sel = self.mod.pick_folder("Επιλογή φακέλου κοινόχρηστων δεδομένων", str(self.mod.STORAGE_ROOT))
         return {"path": sel or ""}
 
+    def api_storage_inspect(self, p, b):
+        path = str(b.get("path") or p.get("path") or "").strip().strip('"')
+        if not path:
+            raise ApiError("Γράψε ή επίλεξε φάκελο")
+        info = self.mod.inspect_data_root(path)
+        info["current"] = str(self.mod.STORAGE_ROOT)
+        try:
+            info["same"] = bool(info.get("root")) and Path(info["root"]).resolve() == Path(self.mod.STORAGE_ROOT).resolve()
+        except Exception:
+            info["same"] = False
+        return info
+
     def api_storage_set(self, p, b):
         path = str(b.get("path") or "").strip().strip('"')
         if not path:

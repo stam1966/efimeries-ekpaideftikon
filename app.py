@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 APP_TITLE = "Εφημερίες Εκπαιδευτικών"
-APP_VERSION = "0.71.0"
+APP_VERSION = "0.72.0"
 UPDATE_REPO = "stam1966/efimeries-ekpaideftikon"  # αποθετήριο GitHub από όπου ελέγχονται οι νέες εκδόσεις
 
 # Όρια εργασίας του εβδομαδιαίου σχεδιασμού (προστατεύουν από πολύ αργούς υπολογισμούς σε μεγάλα σχολεία).
@@ -410,6 +410,82 @@ def discover_school_years() -> List[str]:
             except Exception:
                 continue
     return sorted(set(years))
+
+
+def _data_years(root: Path) -> List[Path]:
+    y = Path(root) / "data" / "years"
+    try:
+        return sorted(y.glob("efimeries_*.db")) if y.is_dir() else []
+    except OSError:
+        return []
+
+
+def resolve_data_root(selected: str) -> Path:
+    """Από τον φάκελο που έδειξε ο χρήστης βρίσκει πού είναι πραγματικά τα δεδομένα των Εφημεριών: ο ίδιος,
+    ο υποφάκελος «Εφημερίες» (κοινός φάκελος της σουίτας «Σχολικές Εφαρμογές»), ή ο παλιός «Shared»."""
+    base = Path(selected)
+    cands = [base, base / SUITE_EF_DIR, base / "Σχολικές Εφαρμογές" / SUITE_EF_DIR, base / "Shared"]
+    for c in cands:
+        if _data_years(c) or (c / "data" / "efimeries.db").exists():
+            return c
+    # χωρίς δεδομένα: αν είναι φάκελος της σουίτας, τα δεδομένα πάνε στον υποφάκελο «Εφημερίες»
+    if (base / "Κοινά").is_dir() or (base / SUITE_EF_DIR).is_dir():
+        return base / SUITE_EF_DIR
+    return base
+
+
+def inspect_data_root(selected: str) -> Dict[str, object]:
+    """Τι υπάρχει στον φάκελο (χωρίς αλλαγές): για προεπισκόπηση πριν από τη σύνδεση σε κοινό φάκελο."""
+    base = Path(selected)
+    out: Dict[str, object] = {"path": str(base), "exists": False, "root": "", "has_data": False, "years": [],
+                              "school": "", "year": "", "teachers": 0, "assignments": 0, "locked_by": "", "writable": False}
+    try:
+        out["exists"] = base.is_dir()
+    except OSError:
+        out["exists"] = False
+    if not out["exists"]:
+        return out
+    root = resolve_data_root(selected)
+    out["root"] = str(root)
+    dbs = _data_years(root)
+    out["years"] = [p.stem.replace("efimeries_", "", 1) for p in dbs]
+    out["has_data"] = bool(dbs) or (root / "data" / "efimeries.db").exists()
+    if dbs:
+        year = ""
+        try:
+            year = (root / "data" / "active_school_year.txt").read_text(encoding="utf-8").strip()
+        except Exception:
+            pass
+        dbp = root / "data" / "years" / f"efimeries_{year}.db" if year else dbs[-1]
+        if not dbp.exists():
+            dbp = dbs[-1]
+        out["year"] = dbp.stem.replace("efimeries_", "", 1)
+        try:
+            conn = sqlite3.connect(f"file:{dbp}?mode=ro", uri=True, timeout=3)
+            try:
+                out["teachers"] = conn.execute("SELECT COUNT(*) FROM teachers").fetchone()[0]
+                out["assignments"] = conn.execute("SELECT COUNT(*) FROM assignments").fetchone()[0]
+                r = conn.execute("SELECT value FROM settings WHERE key='school_name'").fetchone()
+                out["school"] = (r[0] if r else "") or ""
+            finally:
+                conn.close()
+        except Exception:
+            LOG.exception("Προεπισκόπηση δεδομένων %s", dbp)
+    try:
+        info = json.loads((root / ".efimeries.lock").read_text(encoding="utf-8"))
+        host = str(info.get("host", ""))
+        if host and host != socket.gethostname():
+            out["locked_by"] = host
+    except Exception:
+        pass
+    try:
+        probe = (root if root.exists() else base) / f".efimeries_probe_{os.getpid()}"
+        probe.write_text("x", encoding="utf-8")
+        probe.unlink()
+        out["writable"] = True
+    except Exception:
+        out["writable"] = False
+    return out
 
 
 def read_legacy_school_year(path: Path) -> Optional[str]:
@@ -1455,12 +1531,12 @@ class EfimeriesApp:
             selected = pick_folder("Επιλογή φακέλου κοινόχρηστων δεδομένων", str(STORAGE_ROOT))
         if not selected:
             return
-        new_root = Path(selected).resolve()
-        # Ευκολία: αν επιλεγεί ο γονικός φάκελος "Εφημερίες" και υπάρχει υποφάκελος Shared
-        # με δεδομένα, χρησιμοποιούμε αυτόν για να μην καταλήξουν x86/x64 σε διαφορετικές βάσεις.
-        shared_candidate = new_root / "Shared"
-        if shared_candidate.exists() and (shared_candidate / "data").exists() and not (new_root / "data").exists():
-            new_root = shared_candidate.resolve()
+        # Ο φάκελος με τα δεδομένα: ο ίδιος, ο «Εφημερίες» της σουίτας ή ο παλιός «Shared».
+        new_root = resolve_data_root(selected)
+        try:
+            new_root = new_root.resolve()
+        except OSError:
+            pass
         if new_root == STORAGE_ROOT:
             messagebox.showinfo("Φάκελος δεδομένων", "Ο επιλεγμένος φάκελος χρησιμοποιείται ήδη.")
             return
@@ -1472,6 +1548,18 @@ class EfimeriesApp:
                 "Επίλεξε Ναι όταν ρυθμίζεις για πρώτη φορά τον κοινόχρηστο φάκελο. "
                 "Επίλεξε Όχι αν ο κοινόχρηστος φάκελος έχει ήδη τα δεδομένα που θέλεις να χρησιμοποιήσεις."
             )
+        if copy_data and (_data_years(new_root) or (new_root / "data" / "efimeries.db").exists()):
+            # Ποτέ αντιγραφή πάνω σε υπάρχοντα δεδομένα (π.χ. από τον 2ο υπολογιστή πάνω στα δεδομένα του 1ου).
+            messagebox.showerror("Κοινόχρηστος φάκελος",
+                                 "Ο φάκελος έχει ήδη δεδομένα Εφημεριών, οπότε δεν γίνεται αντιγραφή εκεί.\n"
+                                 "Επιλέξτε «Χρήση των δεδομένων που υπάρχουν ήδη».")
+            return
+        if not copy_data and not _data_years(new_root) and not (new_root / "data" / "efimeries.db").exists():
+            messagebox.showerror("Κοινόχρηστος φάκελος",
+                                 f"Στον φάκελο δεν βρέθηκαν δεδομένα Εφημεριών:\n{new_root}\n\n"
+                                 "Στον δεύτερο υπολογιστή δείξτε τον ίδιο φάκελο που επιλέξατε στον πρώτο. "
+                                 "Στον πρώτο υπολογιστή επιλέξτε «Αντιγραφή των τρεχόντων δεδομένων».")
+            return
         try:
             # Κλείνουμε την τρέχουσα βάση πριν αλλάξουμε τοποθεσία.
             try: self.db.close()
@@ -1495,11 +1583,17 @@ class EfimeriesApp:
                 self._acquire_storage_lock()
                 self.active_school_year = prepare_year_storage()
                 self.db = DB(year_db_path(self.active_school_year), self.active_school_year)
-                messagebox.showinfo(
+                who = ""
+                try:
+                    who = str(json.loads((new_root / ".efimeries.lock").read_text(encoding="utf-8")).get("host", ""))
+                except Exception:
+                    pass
+                messagebox.showwarning(
                     "Κοινόχρηστος φάκελος",
                     f"Η διαδρομή αποθηκεύτηκε:\n{new_root}\n\n"
-                    "Ο κοινόχρηστος φάκελος χρησιμοποιείται αυτή τη στιγμή από άλλη συνεδρία. "
-                    "Κλείσε την άλλη εφαρμογή και άνοιξε ξανά αυτήν· τότε θα φορτωθούν τα κοινά δεδομένα."
+                    f"Τα κοινά δεδομένα είναι ανοιχτά αυτή τη στιγμή {('στον υπολογιστή «' + who + '»') if who else 'σε άλλον υπολογιστή'}. "
+                    "Οι Εφημερίες ανοίγουν σε έναν υπολογιστή κάθε φορά. Κλείστε τις εκεί και ανοίξτε ξανά την εφαρμογή εδώ· "
+                    "τότε θα φορτωθούν τα κοινά δεδομένα. Μέχρι τότε βλέπετε τα τοπικά δεδομένα αυτού του υπολογιστή."
                 )
                 return
             save_storage_root(new_root)
