@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 APP_TITLE = "Εφημερίες Εκπαιδευτικών"
-APP_VERSION = "0.72.0"
+APP_VERSION = "0.73.0"
 UPDATE_REPO = "stam1966/efimeries-ekpaideftikon"  # αποθετήριο GitHub από όπου ελέγχονται οι νέες εκδόσεις
 
 # Όρια εργασίας του εβδομαδιαίου σχεδιασμού (προστατεύουν από πολύ αργούς υπολογισμούς σε μεγάλα σχολεία).
@@ -1124,6 +1124,51 @@ def pick_folder(title: str = "Επιλογή φακέλου", initialdir: str = 
     except Exception:
         LOG.exception("Αποτυχία παραθύρου επιλογής φακέλου")
         return ""
+
+
+def pick_file(save: bool, title: str, initialdir: str = "", initialfile: str = "") -> str:
+    """Παράθυρο «Άνοιγμα» / «Αποθήκευση ως» των Windows για αρχεία .efbackup."""
+    try:
+        import tkinter as _tk
+        from tkinter import filedialog as _fd
+        root = _tk.Tk()
+        root.withdraw()
+        try:
+            root.attributes("-topmost", True)
+        except Exception:
+            pass
+        types = [("Αρχείο Εφημεριών", "*.efbackup"), ("Όλα τα αρχεία", "*.*")]
+        try:
+            if save:
+                return _fd.asksaveasfilename(parent=root, title=title, initialdir=initialdir or None, initialfile=initialfile or None,
+                                             defaultextension=".efbackup", filetypes=types) or ""
+            return _fd.askopenfilename(parent=root, title=title, initialdir=initialdir or None, filetypes=types) or ""
+        finally:
+            root.destroy()
+    except Exception:
+        LOG.exception("Αποτυχία παραθύρου επιλογής αρχείου")
+        return ""
+
+
+RECENT_FILES_PATH = app_dir() / "recent_files.json"
+
+
+def recent_files() -> list:
+    """Τα πρόσφατα αρχεία .efbackup αυτού του υπολογιστή (το πρώτο = το «τρέχον» για την Αποθήκευση)."""
+    try:
+        lst = json.loads(RECENT_FILES_PATH.read_text(encoding="utf-8"))
+        return [str(x) for x in lst if isinstance(x, str)][:8]
+    except Exception:
+        return []
+
+
+def remember_file(path: str) -> None:
+    p = str(Path(path))
+    lst = [p] + [x for x in recent_files() if os.path.normcase(x) != os.path.normcase(p)]
+    try:
+        RECENT_FILES_PATH.write_text(json.dumps(lst[:8], ensure_ascii=False, indent=1), encoding="utf-8")
+    except OSError:
+        LOG.exception("Αποτυχία αποθήκευσης πρόσφατων αρχείων")
 
 
 class _Var:
@@ -4303,7 +4348,7 @@ def write_xlsx(path, sheets) -> None:
     os.replace(tmp, path)
 
 
-def write_xlsx_grid(path, title: str, weeks, sheet_name: str = "Πρόγραμμα") -> None:
+def write_xlsx_grid(path, title: str, weeks, sheet_name: str = "Πρόγραμμα", done=None) -> None:
     """Εβδομαδιαίο πλέγμα (όπως το χειροποίητο Excel του σχολείου): ανά εβδομάδα γραμμή ημερομηνιών, γραμμή ημερών
     και μία γραμμή ανά τομέα. weeks = [{"dates":[5 κείμενα], "days":[5 κείμενα], "rows":[(ετικέτα,[5 κείμενα],[5 bool σημείωσης])]}]."""
     from xml.sax.saxutils import escape
@@ -4319,6 +4364,8 @@ def write_xlsx_grid(path, title: str, weeks, sheet_name: str = "Πρόγραμμ
     def cell(col, row, text, style):
         if text == "" or text is None:
             return f'<c r="{_xl_col(col)}{row}" s="{style}"/>'
+        if isinstance(text, int):
+            return f'<c r="{_xl_col(col)}{row}" s="{style}"><v>{text}</v></c>'
         return f'<c r="{_xl_col(col)}{row}" s="{style}" t="inlineStr"><is><t xml:space="preserve">{t(text)}</t></is></c>'
     for wi, wk in enumerate(weeks):
         r += 1  # κενή γραμμή πριν από κάθε εβδομάδα
@@ -4330,6 +4377,19 @@ def write_xlsx_grid(path, title: str, weeks, sheet_name: str = "Πρόγραμμ
         for label, vals, notes in wk["rows"]:
             r += 1
             out.append(f'<row r="{r}" ht="20" customHeight="1">' + cell(0, r, label, 4) + "".join(cell(i + 1, r, vals[i], 6 if notes[i] else 5) for i in range(5)) + "</row>")
+    if done and done[1]:
+        # Πραγματοποιημένες από την αρχή του σχολικού έτους (σε νέα σελίδα εκτύπωσης)
+        dtitle, drows = done
+        r += 1
+        breaks.append(r)
+        r += 1
+        out.append(f'<row r="{r}" ht="22" customHeight="1">' + cell(0, r, dtitle, 7) + "</row>")
+        merges.append(f"A{r}:F{r}")
+        r += 1
+        out.append(f'<row r="{r}">' + cell(0, r, "Εκπαιδευτικός", 3) + cell(1, r, "Πραγματοποιημένες", 3) + cell(2, r, "Στο διάστημα", 3) + "</row>")
+        for name, n_done, n_in in drows:
+            r += 1
+            out.append(f'<row r="{r}" ht="18" customHeight="1">' + cell(0, r, name, 4) + cell(1, r, int(n_done), 5) + cell(2, r, int(n_in), 5) + "</row>")
     last = r
     sheet = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>'
@@ -4364,13 +4424,14 @@ def write_xlsx_grid(path, title: str, weeks, sheet_name: str = "Πρόγραμμ
         '<fill><patternFill patternType="solid"><fgColor rgb="FFFFF2CC"/><bgColor indexed="64"/></patternFill></fill></fills>'
         f'<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>{thin}</borders>'
         '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-        '<cellXfs count="7"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+        '<cellXfs count="8"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
         '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"><alignment vertical="center"/></xf>'
         '<xf numFmtId="0" fontId="2" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center"/></xf>'
         '<xf numFmtId="0" fontId="2" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center"/></xf>'
         '<xf numFmtId="0" fontId="2" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>'
         '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>'
-        '<xf numFmtId="0" fontId="3" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf></cellXfs>'
+        '<xf numFmtId="0" fontId="3" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>'
+        '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="center"/></xf></cellXfs>'
         '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>')
     path = Path(path)
     tmp = path.with_suffix(path.suffix + ".tmp")

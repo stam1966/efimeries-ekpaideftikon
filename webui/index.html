@@ -230,16 +230,42 @@ async function route(){
 }
 /* ---------------- Μενού και γραμμή εργαλείων (όπως στο «Ωρολόγιο Σχολείου») ---------------- */
 const goSet=t=>{ST.tab=t;location.hash==="#settings"?route():go("settings")},goApp=t=>{AT.tab=t;location.hash==="#appsettings"?route():go("appsettings")};
-function MENUS(){const ok=!!S;return [
- ["Αρχείο",[["💾 Αντίγραφα ασφαλείας…","",()=>goApp("backup")],["📂 Αποθήκευση δεδομένων (φάκελος)…","",()=>goApp("storage")],["-"],
-   ["🗓 Σχολικό έτος…","",()=>goSet("year")],["-"],["🖨 Εκτυπώσεις και εξαγωγές","",()=>go("reports")],["🖨 Εκτύπωση τρέχοντος μήνα","",()=>printRange(...monthRange(new Date()))],["-"],
+function MENUS(){const ok=!!S,rec=(ok&&S.recent||[]).filter(f=>f.exists).slice(0,5);return [
+ ["Αρχείο",[["📂 Άνοιγμα…","Ctrl+O",fileOpen],
+   ...rec.map((f,i)=>["   "+(i+1)+". "+f.name,"",()=>fileOpen(f.path)]),["-"],
+   ["💾 Αποθήκευση","Ctrl+S",fileSave],["🗂 Αποθήκευση ως…","Ctrl+Shift+S",fileSaveAs],["-"],
+   ["🛟 Αντίγραφα ασφαλείας…","",()=>goApp("backup")],["📁 Φάκελος δεδομένων…","",()=>goApp("storage")],["-"],
+   ["🖨 Εκτύπωση τρέχουσας εβδομάδας","",()=>printRange(...weekRange(new Date()))],["🖨 Εκτύπωση τρέχοντος μήνα","Ctrl+P",()=>printRange(...monthRange(new Date()))],["🖨 Εκτυπώσεις και εξαγωγές…","",()=>go("reports")],["-"],
    ["⏻ Έξοδος","",()=>{if(confirm("Να κλείσει η εφαρμογή;"))api("/api/quit",{}).then(()=>{document.body.innerHTML='<div style="padding:60px;text-align:center;font:16px system-ui">Η εφαρμογή έκλεισε.</div>'})}]]],
- ["Επεξεργασία",[["↶ Αναίρεση","",doUndo,ok&&!!S.can_undo],["-"],["👤 Νέος εκπαιδευτικός","",()=>{go("teachers");setTimeout(addTeacher,300)}],["🚫 Καταχώρηση απουσίας","",()=>go("absences")]]],
+ ["Επεξεργασία",[["↶ Αναίρεση","Ctrl+Z",doUndo,ok&&!!S.can_undo],["-"],["👤 Νέος εκπαιδευτικός","",()=>{go("teachers");setTimeout(addTeacher,300)}],["🚫 Καταχώρηση απουσίας","",()=>go("absences")],["-"],["🔒 Κλείδωμα πραγματοποιημένων έως…","",lockUntil]]],
  ["Προβολή",PAGES.map(([k,l],i)=>[(cur===k?"✓":"")+"|"+(k==="home"||k==="appsettings"?"":i+". ")+PICON[k]+" "+l,"",()=>go(k)])],
- ["Πρόγραμμα",[["✨ Παραγωγή προγράμματος…","",()=>go("generate")],["📅 Πρόγραμμα","",()=>go("schedule")],["🔒 Κλείδωμα πραγματοποιημένων έως…","",lockUntil],["🖨 Εκτυπώσεις","",()=>go("reports")]]],
+ ["Πρόγραμμα",[["✨ Παραγωγή προγράμματος…","",()=>go("generate")],["📅 Πρόγραμμα","",()=>go("schedule")],["📆 Σήμερα","",goToday],["-"],["🔒 Κλείδωμα πραγματοποιημένων έως…","",lockUntil],["-"],["🖨 Εκτυπώσεις","",()=>go("reports")]]],
+ ["Ρυθμίσεις",[...SCHOOL_TABS.map(([k,l])=>[STICON[k]+" "+l,"",()=>goSet(k)]),["-"],...APP_TABS.map(([k,l])=>[ATICON[k]+" "+l,"",()=>goApp(k)])]],
  ["Εργαλεία",[["🔄 Ενημέρωση από το Ωρολόγιο…","",()=>{ORO=true;goSet("timetable")}],["📥 Εισαγωγή ωρολογίου (aSc / Excel)","",()=>goSet("timetable")],
-   ...(ok&&S.sibling?[["📅 Ωρολόγιο Σχολείου ↗","",launchOrologio]]:[]),["📄 Εισαγωγή / εξαγωγή CSV…","",()=>goApp("csv")],["-"],["⚙ Ρυθμίσεις εφαρμογής","",()=>goApp("app")]]],
- ["Βοήθεια",[["📖 Οδηγός χρήσης","",()=>guard(async()=>{await api("/api/guide",{})})],["🔎 Έλεγχος για νέα έκδοση","",()=>goApp("app")],["ℹ Σχετικά","",()=>openDrawer("Εφημερίες Εκπαιδευτικών","Έκδοση v"+(S?S.version+" · "+S.arch:""),h("p",{},"Πρόγραμμα εφημεριών εκπαιδευτικών. Λειτουργεί τοπικά· τα δεδομένα δεν φεύγουν από τον υπολογιστή ή τον κοινό φάκελο του σχολείου."),h("p",{},h("b",{},"Ιδέα και σχεδιασμός: Σταμάτης Κοκολόγος, εκπαιδευτικός ΠΕ70, 22ο Δημοτικό Σχολείο Λαμίας")),h("p",{class:"m",style:"color:var(--muted)"},"Μέλος της σουίτας «Σχολικές Εφαρμογές» μαζί με το Ωρολόγιο Σχολείου. Ελεύθερο λογισμικό, άδεια GNU GPL v3.0."),h("button",{class:"btn",onclick:closeDrawer},"Κλείσιμο"))]]]];}
+   ...(ok&&S.sibling?[["📅 Ωρολόγιο Σχολείου ↗","",launchOrologio]]:[]),["📄 Εισαγωγή / εξαγωγή CSV…","",()=>goApp("csv")]]],
+ ["Βοήθεια",[["📖 Οδηγός χρήσης","F1",()=>guard(async()=>{await api("/api/guide",{})})],["⌨ Συντομεύσεις πληκτρολογίου","",showKeys],["🔎 Έλεγχος για νέα έκδοση","",()=>goApp("app")],["ℹ Σχετικά","",()=>openDrawer("Εφημερίες Εκπαιδευτικών","Έκδοση v"+(S?S.version+" · "+S.arch:""),h("p",{},"Πρόγραμμα εφημεριών εκπαιδευτικών. Λειτουργεί τοπικά· τα δεδομένα δεν φεύγουν από τον υπολογιστή ή τον κοινό φάκελο του σχολείου."),h("p",{},h("b",{},"Ιδέα και σχεδιασμός: Σταμάτης Κοκολόγος, εκπαιδευτικός ΠΕ70, 22ο Δημοτικό Σχολείο Λαμίας")),h("p",{class:"m",style:"color:var(--muted)"},"Μέλος της σουίτας «Σχολικές Εφαρμογές» μαζί με το Ωρολόγιο Σχολείου. Ελεύθερο λογισμικό, άδεια GNU GPL v3.0."),h("button",{class:"btn",onclick:closeDrawer},"Κλείσιμο"))]]]];}
+const STICON={school:"🏫",year:"🗓",areas:"📍",intervals:"⏱",shifts:"🔁",days:"📌",timetable:"📥"},ATICON={storage:"📁",backup:"🛟",csv:"📄",app:"⚙"};
+function weekRange(d){const m=new Date(d);m.setDate(d.getDate()-((d.getDay()+6)%7));if(d.getDay()===6||d.getDay()===0)m.setDate(m.getDate()+7);const f=new Date(m);f.setDate(m.getDate()+4);return [iso(m),iso(f)]}
+function goToday(){SV.month=null;SV.goToday=true;location.hash==="#schedule"?route():go("schedule")}
+/* ---------------- Αρχείο: Άνοιγμα / Αποθήκευση / Αποθήκευση ως ----------------
+   Τα δεδομένα αποθηκεύονται αυτόματα σε κάθε αλλαγή. Η «Αποθήκευση» γράφει επιπλέον όλο το σχολικό έτος σε αρχείο
+   .efbackup (π.χ. σε USB ή στο cloud)· το «Άνοιγμα» φέρνει πίσω ένα τέτοιο αρχείο. */
+function fileSave(){guard(async()=>{toast("Αποθήκευση…",1500);const r=await api("/api/file/save",{});if(r.saved){toast("💾 Αποθηκεύτηκε στο «"+r.path+"»",5000);S=await api("/api/state");renderMenubar()}})}
+function fileSaveAs(){guard(async()=>{toast("Διάλεξε πού θα αποθηκευτεί το αρχείο (το παράθυρο ίσως ανοίξει πίσω από την εφαρμογή)…",4000);const r=await api("/api/file/saveas",{});if(r.saved){toast("💾 Αποθηκεύτηκε στο «"+r.path+"»",5000);S=await api("/api/state");renderMenubar()}})}
+function fileOpen(path){guard(async()=>{if(typeof path!=="string"){path="";toast("Διάλεξε αρχείο .efbackup (το παράθυρο ίσως ανοίξει πίσω από την εφαρμογή)…",4000)}
+  const r=await api("/api/file/pick",path?{path}:{});if(!r.path)return;const i=r.info;
+  const msg="Άνοιγμα του αρχείου «"+r.name+"»\nΣχολικό έτος "+i.school_year+(i.created_at?" · αποθηκεύτηκε "+i.created_at.replace("T"," "):"")+".\n\n"+
+    (i.exists?"Τα τωρινά δεδομένα του σχολικού έτους "+i.school_year+" θα ΑΝΤΙΚΑΤΑΣΤΑΘΟΥΝ από το αρχείο. Πριν από αυτό κρατιέται αυτόματο αντίγραφο ασφαλείας (Αρχείο → Αντίγραφα ασφαλείας).":"Το σχολικό έτος "+i.school_year+" θα προστεθεί και θα ανοίξει.")+
+    (i.newer?"\n\nΠροσοχή: το αρχείο έγινε από νεότερη έκδοση ("+i.app_version+").":"")+"\n\nΝα συνεχιστεί;";
+  if(!confirm(msg))return;const x=await api("/api/file/open",{path:r.path});toast("📂 Άνοιξε το «"+r.name+"» (σχολικό έτος "+x.info.school_year+")",6000);S=null;route()})}
+function showKeys(){const k=[["Ctrl+O","Άνοιγμα αρχείου"],["Ctrl+S","Αποθήκευση"],["Ctrl+Shift+S","Αποθήκευση ως"],["Ctrl+Z","Αναίρεση"],["Ctrl+P","Εκτύπωση τρέχοντος μήνα"],["F1","Οδηγός χρήσης"],["Alt+1 … Alt+6","Μετάβαση στις σελίδες του μενού"],["Esc","Κλείσιμο παραθύρου ή μενού"]];
+  openDrawer("Συντομεύσεις πληκτρολογίου","",h("table",{class:"tbl"},k.map(([a,b])=>h("tr",{},h("td",{},h("kbd",{},a)),h("td",{},b)))),h("button",{class:"btn",onclick:closeDrawer},"Κλείσιμο"))}
+addEventListener("keydown",e=>{const c=e.ctrlKey||e.metaKey,K=e.key.toLowerCase();let f=null;
+  if(c&&K==="o")f=()=>fileOpen();else if(c&&e.shiftKey&&K==="s")f=fileSaveAs;else if(c&&K==="s")f=fileSave;else if(c&&K==="p")f=()=>printRange(...monthRange(new Date()));
+  else if(c&&K==="z"&&!/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)){if(S&&S.can_undo)f=doUndo}
+  else if(e.key==="F1")f=()=>guard(async()=>{await api("/api/guide",{})});
+  else if(e.altKey&&/^[1-6]$/.test(e.key)){const pg=PAGES[+e.key];if(pg)f=()=>go(pg[0])}
+  if(f){e.preventDefault();closeMenu();f()}});
 const PICON={home:"🏠",settings:"🏫",teachers:"👥",generate:"✨",schedule:"📅",reports:"🖨",absences:"🚫",appsettings:"⚙"};
 let MBO=-1,RIB=localStorage.getItem("ef.rib")||"home",RIBOFF=localStorage.getItem("ef.riboff")==="1";
 function renderMenubar(){const m=$("#menubar");m.replaceChildren(h("button",{class:"rtab"+(RIB==="home"&&!RIBOFF?" ron":""),onclick:()=>{closeMenu();setRib("home")}},"Κεντρική"),
@@ -257,9 +283,9 @@ addEventListener("keydown",e=>{if(e.key==="Escape"&&MBO>=0)closeMenu()});
 function ribLabel(lab){let on=false;if(lab.includes("|")){const p=lab.split("|");on=p[0]==="✓";lab=p[1]}lab=lab.replace(/^\d+\.\s*/,"").replace(/…$/,"").replace(/ ↗$/,"");
   const m=lab.match(/^(\p{Extended_Pictographic}\uFE0F?|[↶⏻ℹ])\s*/u);let ic="▫";if(m){ic=m[1];lab=lab.slice(m[0].length)}return {ic,lab,on}}
 function ribItems(){const M=MENUS(),f=(m,l)=>{const x=M.find(z=>z[0]===m);return x&&x[1].find(it=>it[0]&&it[0].includes(l))};
-  if(RIB==="home")return [f("Επεξεργασία","Αναίρεση"),["-"],f("Προβολή","Αρχική"),["-"],f("Πρόγραμμα","Παραγωγή"),f("Πρόγραμμα","Πρόγραμμα"),["-"],f("Επεξεργασία","απουσίας"),f("Προβολή","Εκπαιδευτικοί"),["-"],
-    f("Αρχείο","τρέχοντος μήνα"),f("Πρόγραμμα","Εκτυπώσεις"),["-"],f("Εργαλεία","Ενημέρωση από"),f("Εργαλεία","Ωρολόγιο Σχολείου"),["-"],f("Βοήθεια","Οδηγός")].filter(Boolean);
-  const x=M.find(z=>z[0]===RIB);return x?x[1]:[]}
+  if(RIB==="home")return [f("Αρχείο","Άνοιγμα"),f("Αρχείο","💾 Αποθήκευση"),f("Επεξεργασία","Αναίρεση"),["-"],f("Προβολή","Αρχική"),["-"],f("Πρόγραμμα","Παραγωγή"),f("Πρόγραμμα","📅 Πρόγραμμα"),f("Πρόγραμμα","Σήμερα"),["-"],f("Επεξεργασία","απουσίας"),f("Προβολή","Εκπαιδευτικοί"),["-"],
+    f("Αρχείο","τρέχουσας εβδομάδας"),f("Αρχείο","τρέχοντος μήνα"),f("Πρόγραμμα","Εκτυπώσεις"),["-"],f("Εργαλεία","Ενημέρωση από"),f("Εργαλεία","Ωρολόγιο Σχολείου"),["-"],f("Βοήθεια","Οδηγός")].filter(Boolean);
+  const x=M.find(z=>z[0]===RIB);return x?x[1].filter(it=>!it[0].startsWith("   ")):[]}
 function renderRibbon(){const r=$("#ribbon");r.classList.toggle("off",RIBOFF);if(RIBOFF){r.replaceChildren();return}
   const its=ribItems();while(its.length&&its[0][0]==="-")its.shift();
   r.replaceChildren(...its.map(it=>{if(it[0]==="-")return h("span",{class:"rsep"});const [lab,key,fn,en=true]=it,L=ribLabel(lab);
@@ -354,7 +380,7 @@ async function doUndo(){await guard(async()=>{const r=await api("/api/undo",{});
 const monthRange=d=>[iso(new Date(d.getFullYear(),d.getMonth(),1)),iso(new Date(d.getFullYear(),d.getMonth()+1,0))];
 function printRange(a,z){window.open("/api/print?"+q({from:a,to:z,t:TOKEN}),"_blank")}
 /* ---------------- Πρόγραμμα ---------------- */
-let SV={view:"list",month:null,teacher:""};
+let SV={view:(()=>{try{return localStorage.getItem("ef.sv")||"week"}catch(e){return "week"}})(),month:null,teacher:""};
 PAGE.schedule=async v=>{
   if(!SV.month){SV.month=new Date(parse(S.today).getFullYear(),parse(S.today).getMonth(),1);SV.goToday=true}
   const [a,z]=monthRange(SV.month);
@@ -368,7 +394,7 @@ PAGE.schedule=async v=>{
     h("button",{class:"btn sm",onclick:()=>{SV.month=new Date(SV.month.getFullYear(),SV.month.getMonth()+1,1);route()},"aria-label":"Επόμενος μήνας"},"›"),
     h("button",{class:"btn sm",onclick:()=>{SV.month=null;SV.goToday=true;route()}},"Σήμερα"),
     h("div",{class:"sp"}),sel,
-    h("div",{class:"seg"},["list","week"].map(k=>h("button",{class:SV.view===k?"on":"",onclick:()=>{SV.view=k;route()}},k==="list"?"Λίστα":"Εβδομάδες"))),
+    h("div",{class:"seg"},["week","list"].map(k=>h("button",{class:SV.view===k?"on":"",onclick:()=>{SV.view=k;try{localStorage.setItem("ef.sv",k)}catch(e){}route()}},k==="list"?"Λίστα":"Εβδομάδες"))),
     h("button",{class:"btn sm",onclick:()=>printRange(a,z)},"Εκτύπωση μήνα"));
   v.append(bar);const box=h("div");v.append(box);
   function draw(){

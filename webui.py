@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import re
 import os
 import queue
 import secrets
@@ -344,6 +345,7 @@ class WebUI:
             "update": self.update_info(),
             "auto_update": self.app._update_state().get("auto", True) is not False,
             "can_undo": bool(app.__dict__.get("_undo_stack")),
+            "recent": [{"path": f, "name": os.path.basename(f), "exists": os.path.isfile(f)} for f in self.mod.recent_files()],
             "fair": sorted(({"name": t.name, "minutes": sums.get(t.id, 0), "credit": credit.get(t.id, 0)} for t in teachers), key=lambda x: (-(x["minutes"] + x["credit"]), x["name"])),
         }
 
@@ -696,6 +698,39 @@ class WebUI:
             mon += timedelta(days=7)
         return weeks
 
+    def _done_data(self, a: date, z: date):
+        """Πραγματοποιημένες εφημερίες κάθε εκπαιδευτικού από την αρχή του σχολικού έτους έως σήμερα, και πόσες
+        έχει στο διάστημα της εκτύπωσης. → (τίτλος, [(όνομα, πραγματοποιημένες, στο διάστημα)])"""
+        today = date.today()
+        try:
+            start = self._d(self.db.get_setting("start_date", ""))
+        except Exception:
+            start = a
+        until = min(today, max(z, start))
+        done: Dict[str, int] = {}
+        for r in self._duty_rows(start, until) if start <= until else []:
+            if int(r["locked"] or 0) or r["d"] < today.isoformat():
+                done[r["teacher"]] = done.get(r["teacher"], 0) + 1
+        inper: Dict[str, int] = {}
+        for r in self._duty_rows(a, z):
+            inper[r["teacher"]] = inper.get(r["teacher"], 0) + 1
+        names = sorted({t.name for t in self.db.teachers() if t.active} | set(done) | set(inper), key=lambda n: n.casefold())
+        title = (f"Πραγματοποιημένες εφημερίες από την αρχή του σχολικού έτους "
+                 f"({self.mod.fmt_date(start.isoformat())} έως {'σήμερα' if until == today else self.mod.fmt_date(until.isoformat())})")
+        return title, [(n, done.get(n, 0), inper.get(n, 0)) for n in names]
+
+    def _done_table(self, a: date, z: date, esc, fmt) -> str:
+        title, data = self._done_data(a, z)
+        if not data:
+            return ""
+        head = f"<div class='done'><h3>{esc(title)}</h3>"
+        names = [d[0] for d in data]; done = {d[0]: d[1] for d in data}; inper = {d[0]: d[2] for d in data}
+        half = (len(names) + 1) // 2
+        def tbl(lst):
+            return ("<table><tr><th>Εκπαιδευτικός</th><th class='c'>Πραγματοποιημένες</th><th class='c'>Στο διάστημα</th></tr>"
+                    + "".join(f"<tr><td>{esc(n)}</td><td class='c'><b>{done.get(n, 0)}</b></td><td class='c'>{inper.get(n, 0)}</td></tr>" for n in lst) + "</table>")
+        return head + "<div class='cols'>" + tbl(names[:half]) + (tbl(names[half:]) if names[half:] else "") + "</div></div>"
+
     def _who_ids(self, who: str) -> List[int]:
         if who.startswith("teacher:"):
             return [int(who.split(":", 1)[1])]
@@ -730,6 +765,7 @@ class WebUI:
         if who == "all" and p.get("fmt", "grid") == "grid":
             weeks = self._grid_weeks(a, z)
             out[1] = out[1].replace("</style>", ".wk{page-break-inside:avoid;margin-bottom:14px}.wk table{table-layout:fixed}.wk th{text-align:center;background:#d9d9d9}.wk td{text-align:center;height:24px}"
+                                    ".done{page-break-inside:avoid;margin-top:16px}.done h3{font-size:14px;margin:0 0 6px}.done .cols{display:flex;gap:14px;align-items:flex-start}.done table{width:auto;flex:1}.done td.c,.done th.c{text-align:center;width:22%}"
                                     ".wk td.l{text-align:left;font-weight:700;width:13%}.wk td.n{background:#fff2cc;font-style:italic;color:#7a5a00;font-size:11px}.wk th.e{background:#fff}"
                                     "@media print{@page{size:A4 landscape;margin:8mm}.wk{margin-bottom:10px}}</style>")
             out.append(f"<h1>{school}</h1><p style='font-size:15px;color:#111'><b>Πρόγραμμα Εφημεριών από {fmt(a.isoformat())} έως {fmt(z.isoformat())}</b></p>")
@@ -739,6 +775,7 @@ class WebUI:
                 for lab, vals, flags in wk["rows"]:
                     t += f"<tr><td class='l'>{esc(lab)}</td>" + "".join(f"<td{' class=n' if f else ''}>{esc(v)}</td>" for v, f in zip(vals, flags)) + "</tr>"
                 out.append(t + "</table></div>")
+            out.append(self._done_table(a, z, esc, fmt))
         elif who == "all":
             rows = self._duty_rows(a, z)
             out.append(f"<h1>{school}</h1><p>Εφημερίες {period}</p>" + table(rows, True))
@@ -1147,7 +1184,8 @@ class WebUI:
             raise ApiError("Δεν υπάρχουν εφημερίες στο διάστημα.")
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "g.xlsx"
-            m.write_xlsx_grid(path, f"Πρόγραμμα Εφημεριών από: {m.fmt_date(a.isoformat())} έως {m.fmt_date(z.isoformat())}", weeks)
+            m.write_xlsx_grid(path, f"Πρόγραμμα Εφημεριών από: {m.fmt_date(a.isoformat())} έως {m.fmt_date(z.isoformat())}", weeks,
+                              done=self._done_data(a, z))
             data = path.read_bytes()
         return ("file", f"Programma_Efimerion_{a.isoformat()}_{z.isoformat()}.xlsx", data,
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
@@ -1295,6 +1333,69 @@ class WebUI:
         if not name.startswith("Efimeries_Auto_") or not f.is_file():
             raise ApiError("Δεν βρέθηκε το αντίγραφο")
         return self._do_restore(f.read_bytes(), True)
+
+    # ------------------------------------------------------- Αρχείο: Άνοιγμα / Αποθήκευση / Αποθήκευση ως (v0.73)
+    def _save_to(self, path: str) -> dict:
+        m = self.mod
+        sy = self.db.get_setting("school_year", self.app.active_school_year)
+        target = Path(path)
+        if target.suffix.lower() != ".efbackup":
+            target = target.with_name(target.name + ".efbackup")
+        if not target.parent.is_dir():
+            raise ApiError("Ο φάκελος «" + str(target.parent) + "» δεν υπάρχει ή δεν είναι προσβάσιμος.")
+        tmp = target.with_name(target.name + ".tmp")
+        try:
+            self.app._write_backup_zip(tmp, sy)
+            os.replace(tmp, target)
+        except OSError as e:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            raise ApiError("Η αποθήκευση στο «" + str(target) + "» απέτυχε: " + str(e))
+        m.remember_file(str(target))
+        return {"saved": True, "path": str(target), "name": target.name}
+
+    def api_file_saveas(self, p, b):
+        m = self.mod
+        rec = m.recent_files()
+        sy = self.db.get_setting("school_year", self.app.active_school_year)
+        initdir = os.path.dirname(rec[0]) if rec and os.path.isdir(os.path.dirname(rec[0])) else str(Path.home() / "Documents")
+        name = re.sub(r'[\\/:*?"<>|]+', " ", self.db.get_setting("school_name", "").strip() or "Εφημερίες").strip()
+        sel = m.pick_file(True, "Αποθήκευση ως", initdir, f"Εφημερίες {name} {sy}.efbackup")
+        if not sel:
+            return {"saved": False}
+        return self._save_to(sel)
+
+    def api_file_save(self, p, b):
+        rec = self.mod.recent_files()
+        if rec and os.path.isdir(os.path.dirname(rec[0])):
+            return self._save_to(rec[0])
+        return self.api_file_saveas(p, b)
+
+    def _file_bytes(self, path: str) -> bytes:
+        f = Path(path)
+        if not f.is_file():
+            raise ApiError("Το αρχείο «" + path + "» δεν βρέθηκε.")
+        if f.stat().st_size > 200 * 1024 * 1024:
+            raise ApiError("Το αρχείο είναι υπερβολικά μεγάλο για αρχείο Εφημεριών.")
+        return f.read_bytes()
+
+    def api_file_pick(self, p, b):
+        """«Άνοιγμα…»: επιλογή αρχείου και προεπισκόπηση (χωρίς αλλαγή δεδομένων)."""
+        rec = self.mod.recent_files()
+        initdir = os.path.dirname(rec[0]) if rec and os.path.isdir(os.path.dirname(rec[0])) else str(Path.home() / "Documents")
+        sel = str(b.get("path") or "") or self.mod.pick_file(False, "Άνοιγμα αρχείου Εφημεριών", initdir)
+        if not sel:
+            return {"path": ""}
+        r = self._do_restore(self._file_bytes(sel), False)
+        return {"path": sel, "name": os.path.basename(sel), "info": r["info"]}
+
+    def api_file_open(self, p, b):
+        path = str(b.get("path") or "")
+        r = self._do_restore(self._file_bytes(path), True)
+        self.mod.remember_file(path)
+        return r
 
     # ------------------------------------------------------- σχολικά έτη (v0.66)
     def api_years(self, p, b):
