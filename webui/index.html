@@ -618,7 +618,7 @@ TAB.app=async v=>{
 const RP={a:null,z:null,who:"all",remind:"0",fmt:"grid"};
 PAGE.reports=async v=>{
   const [{teachers},g]=await Promise.all([api("/api/teachers"),api("/api/settings")]);
-  const tl=teachers.filter(t=>t.active);
+  const tl=teachers.filter(t=>t.active&&t.participates);
   if(!RP.a){[RP.a,RP.z]=monthRange(new Date())}
   const a=h("input",{type:"date",value:RP.a,onchange:e=>RP.a=e.target.value}),z=h("input",{type:"date",value:RP.z,onchange:e=>RP.z=e.target.value});
   const setR=(x,y)=>{RP.a=x;RP.z=y;a.value=x;z.value=y};
@@ -626,6 +626,7 @@ PAGE.reports=async v=>{
   const who=h("select",{id:"rp-who",onchange:e=>RP.who=e.target.value},
     h("option",{value:"all"},"Όλοι οι εκπαιδευτικοί (ένας πίνακας)"),
     h("option",{value:"each"},"Ο καθένας σε ξεχωριστό φύλλο (όλοι μεμιάς)"),
+    h("option",{value:"totals"},"Σύνολα ανά εκπαιδευτικό (ισοκατανομή)"),
     tl.map(t=>h("option",{value:"teacher:"+t.id},t.name)));
   who.value=RP.who;
   const fmtSel=h("select",{id:"rp-fmt",onchange:e=>RP.fmt=e.target.value},h("option",{value:"grid"},"Εβδομαδιαίο πλέγμα (εβδομάδες με ημέρες στις στήλες)"),h("option",{value:"list"},"Λίστα (μία γραμμή ανά εφημερία)"));
@@ -650,7 +651,7 @@ PAGE.reports=async v=>{
         h("button",{class:"btn sm",onclick:()=>setR(g.start,g.end)},"Όλο το σχολικό έτος"))),
     h("div",{class:"card"},h("h2",{},"Εκτύπωση"),
       h("div",{class:"row"},fld("Για ποιους",who)),fmtRow,
-      h("p",{class:"m",style:"color:var(--muted)"},"«Ο καθένας σε ξεχωριστό φύλλο»: κάθε εκπαιδευτικός με εφημερίες στο διάστημα παίρνει δική του σελίδα, ώστε να εκτυπωθούν όλες μαζί και να μοιραστούν."),
+      h("p",{class:"m",style:"color:var(--muted)"},"«Ο καθένας σε ξεχωριστό φύλλο»: κάθε εκπαιδευτικός με εφημερίες στο διάστημα παίρνει δική του σελίδα, ώστε να εκτυπωθούν όλες μαζί και να μοιραστούν. «Σύνολα»: πραγματοποιημένες, προγραμματισμένες και σύνολο έτους κάθε εκπαιδευτικού, με κατανομή ανά ημέρα της εβδομάδας. Στις εκτυπώσεις εμφανίζονται μόνο όσοι συμμετέχουν στις εφημερίες."),
       h("div",{class:"row",style:"margin-top:12px"},h("button",{class:"btn pri",id:"rp-print",onclick:()=>{if(!RP.a||!RP.z||RP.a>RP.z)return toast("Έλεγξε το διάστημα");window.open("/api/print?"+q({from:RP.a,to:RP.z,who:RP.who,fmt:RP.fmt,t:TOKEN}),"_blank")}},"Άνοιγμα για εκτύπωση"))),
     h("div",{class:"card"},h("h2",{},"Αρχεία Excel και CSV"),
       h("p",{class:"m",style:"color:var(--muted)"},"Κατεβαίνουν στον φάκελο λήψεων του υπολογιστή. Το απλό Excel έχει τρία φύλλα: Πρόγραμμα, Σύνολα ανά εκπαιδευτικό και Απουσίες (όλο το σχολικό έτος). Το «εβδομαδιαίο πλέγμα» είναι ένα φύλλο στη μορφή του προγράμματος που κρεμάς στην αίθουσα, για το διάστημα που διάλεξες παραπάνω."),

@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 APP_TITLE = "Εφημερίες Εκπαιδευτικών"
-APP_VERSION = "0.73.0"
+APP_VERSION = "0.74.0"
 UPDATE_REPO = "stam1966/efimeries-ekpaideftikon"  # αποθετήριο GitHub από όπου ελέγχονται οι νέες εκδόσεις
 
 # Όρια εργασίας του εβδομαδιαίου σχεδιασμού (προστατεύουν από πολύ αργούς υπολογισμούς σε μεγάλα σχολεία).
@@ -1203,6 +1203,103 @@ class _TextBuf:
 MONTHS_GR_ALL = ["Ιανουάριος", "Φεβρουάριος", "Μάρτιος", "Απρίλιος", "Μάιος", "Ιούνιος", "Ιούλιος", "Αύγουστος", "Σεπτέμβριος", "Οκτώβριος", "Νοέμβριος", "Δεκέμβριος"]
 
 
+class MinCostFlow:
+    """Ελάχιστου κόστους ροή (primal-dual: Dijkstra με δυναμικά + ροή μπλοκαρίσματος στα «μηδενικά» τόξα).
+    Ακέραια κόστη ≥ 0. Χρησιμοποιείται για τη βέλτιστη ισοκατανομή της ημερήσιας εφημερίας."""
+
+    def __init__(self, n: int):
+        self.n = n
+        self.g: List[list] = [[] for _ in range(n)]
+
+    def add(self, u: int, v: int, cap: int, cost: int) -> None:
+        if cap <= 0:
+            return
+        a = [v, cap, int(cost), None]
+        b = [u, 0, -int(cost), a]
+        a[3] = b
+        self.g[u].append(a)
+        self.g[v].append(b)
+
+    def solve(self, s: int, t: int, need: int, deadline: float = 0.0) -> int:
+        import heapq
+        n, g = self.n, self.g
+        h = [0] * n
+        flow = 0
+        INF = float("inf")
+        while flow < need:
+            if deadline and time.monotonic() > deadline:
+                break
+            dist = [INF] * n
+            dist[s] = 0
+            pq = [(0, s)]
+            while pq:
+                du, u = heapq.heappop(pq)
+                if du > dist[u]:
+                    continue
+                hu = h[u]
+                for e in g[u]:
+                    if e[1] > 0:
+                        v = e[0]
+                        nd = du + e[2] + hu - h[v]
+                        if nd < dist[v]:
+                            dist[v] = nd
+                            heapq.heappush(pq, (nd, v))
+            if dist[t] == INF:
+                break
+            for v in range(n):
+                if dist[v] < INF:
+                    h[v] += dist[v]
+            # ροή μπλοκαρίσματος στα τόξα μηδενικού ανηγμένου κόστους (επίπεδα BFS για αποφυγή κύκλων)
+            while flow < need:
+                level = [-1] * n
+                level[s] = 0
+                q = [s]
+                for u in q:
+                    for e in g[u]:
+                        v = e[0]
+                        if e[1] > 0 and level[v] < 0 and e[2] + h[u] - h[v] == 0:
+                            level[v] = level[u] + 1
+                            q.append(v)
+                if level[t] < 0:
+                    break
+                it = [0] * n
+                pushed_any = False
+                while flow < need:
+                    # επαναληπτικό DFS για μία μονάδα
+                    path = []
+                    u = s
+                    while u != t:
+                        adv = False
+                        while it[u] < len(g[u]):
+                            e = g[u][it[u]]
+                            v = e[0]
+                            if e[1] > 0 and level[v] == level[u] + 1 and e[2] + h[u] - h[v] == 0:
+                                path.append(e)
+                                u = v
+                                adv = True
+                                break
+                            it[u] += 1
+                        if not adv:
+                            if u == s:
+                                break
+                            level[u] = -1
+                            e = path.pop()
+                            u = e[3][0]
+                            it[u] += 1
+                    if u != t:
+                        break
+                    f = min(e[1] for e in path)
+                    f = min(f, need - flow)
+                    for e in path:
+                        e[1] -= f
+                        e[3][1] += f
+                    flow += f
+                    pushed_any = True
+                if not pushed_any:
+                    break
+        return flow
+
+
 class EfimeriesApp:
     """Η λογική της εφαρμογής (βάση, παραγωγή, απουσίες, αντίγραφα). Η διεπαφή είναι η webui.WebUI στον browser.
 
@@ -1838,6 +1935,10 @@ class EfimeriesApp:
     def excused_days(self, teacher_ids) -> Dict[int, int]:
         """Σχολικές ημέρες που ο/η εκπαιδευτικός δεν ήταν/δεν θα είναι στο σχολείο ΚΑΙ δεν αναπληρώνει:
         απουσίες με «Δεν αναπληρώνει» και ημέρες εκτός του «Στο σχολείο από – έως»."""
+        return {tid: len(v) for tid, v in self.excused_dates(teacher_ids).items()}
+
+    def excused_dates(self, teacher_ids) -> Dict[int, List[str]]:
+        """Όπως το excused_days, αλλά με τις ίδιες τις ημερομηνίες (για τη σταδιακή πίστωση μέσα στη χρονιά)."""
         ids = set(teacher_ids)
         spans: Dict[int, list] = {}
         try:
@@ -1857,9 +1958,9 @@ class EfimeriesApp:
             except ValueError:
                 pass
         if not spans:
-            return {tid: 0 for tid in ids}
+            return {tid: [] for tid in ids}
         days = [d.isoformat() for d in self.school_days()]
-        return {tid: (sum(1 for d in days if any(a <= d <= b for a, b in spans.get(tid, []))) if tid in spans else 0) for tid in ids}
+        return {tid: ([d for d in days if any(a <= d <= b for a, b in spans.get(tid, []))] if tid in spans else []) for tid in ids}
 
     def fair_credit(self, teachers, unit: str = "minutes") -> Dict[int, float]:
         """Ό,τι λογαριάζεται σε κάθε εκπαιδευτικό για τις ημέρες χωρίς αναπλήρωση: ο μέσος όρος των συναδέλφων.
@@ -2558,6 +2659,196 @@ class EfimeriesApp:
             total_minutes.update(new_totals)
             changes += 1
         return rows, changes, spread() - old_spread
+
+    def optimize_daily_fairness(self, rows, teachers: List[Teacher], generate_from: date, generate_to: date, time_limit: float = 60.0):
+        """Βέλτιστη ισοκατανομή της ημερήσιας εφημερίας σε ΟΛΟ το διάστημα παραγωγής (ελάχιστου κόστους ροή).
+
+        Κρατά τις ίδιες θέσεις (ημέρα/τομέας) και ξαναμοιράζει τους εκπαιδευτικούς ώστε:
+        • σε ΚΑΘΕ εβδομάδα το σωρευτικό σύνολο του καθενός από την αρχή του έτους (μαζί με την πίστωση
+          για ημέρες χωρίς αναπλήρωση) να είναι όσο γίνεται ίσο με των άλλων — όχι μόνο στο τέλος της χρονιάς·
+        • στο τέλος του έτους τα σύνολα να διαφέρουν το πολύ όσο επιβάλλουν οι διαθεσιμότητες·
+        • να τηρούνται διαθεσιμότητα, απουσίες, μία εφημερία την ημέρα, όχι δεύτερη την εβδομάδα χωρίς
+          «πρόσθετο κύκλο», και κατά προτίμηση η κύρια/εναλλακτικές ημέρες.
+        Επιστρέφει (rows, αλλαγές, (απόκλιση_πριν, απόκλιση_μετά)) — ή τις αρχικές γραμμές αν κάτι δεν πάει καλά."""
+        if not rows or len(teachers) < 2:
+            return rows, 0, None
+        t0 = time.monotonic()
+        tby = {t.id: t for t in teachers}
+        tids = [t.id for t in teachers]
+        w_year = max(1, self.rule_weight("w_fair_year"))
+        w_week = max(1, self.rule_weight("w_fair_week"))
+        w_day = max(0, self.rule_weight("w_day"))
+        C_CUM, C_FINAL = 2 * w_week, 8 * w_year          # κόστος (τετράγωνα) σωρευτικών / τελικών συνόλων
+        C_ALT, C_OTHER, C_SECOND = 4 * w_day, 12 * w_day, 40
+        BIG = 10 ** 6
+
+        def wkey(ds):
+            iso = parse_date(ds).isocalendar()
+            return (iso[0], iso[1])
+
+        days = sorted({r[0] for r in rows})
+        weeks = sorted({wkey(d) for d in days})
+        widx = {w: i for i, w in enumerate(weeks)}
+        nW = len(weeks)
+        slots_by_day: Dict[str, list] = {}
+        for i, r in enumerate(rows):
+            slots_by_day.setdefault(r[0], []).append(i)
+        # Ήδη υπάρχουσες (παλαιότερες/κλειδωμένες) αναθέσεις: βάση των σωρευτικών και «πιασμένες» ημέρες.
+        fixed = self.db.conn.execute("SELECT teacher_id,d FROM assignments WHERE mode='daily' AND teacher_id IS NOT NULL").fetchall()
+        fixed_day = {(r["teacher_id"], r["d"]) for r in fixed}
+        fixed_week: Dict[Tuple[int, tuple], int] = {}
+        for r in fixed:
+            if generate_from.isoformat() <= r["d"] <= generate_to.isoformat():
+                k = (r["teacher_id"], wkey(r["d"]))
+                fixed_week[k] = fixed_week.get(k, 0) + 1
+        week_end = [max(d for d in days if wkey(d) == w) for w in weeks]
+        # Πίστωση για ημέρες χωρίς αναπλήρωση, σταδιακά όπως περνούν οι ημέρες.
+        k_areas = max(1, len(self.db.areas(True)))
+        per_day = k_areas / len(teachers)
+        exc = self.excused_dates(tids)
+        fixed_dates: Dict[int, List[str]] = {}
+        for r in fixed:
+            fixed_dates.setdefault(r["teacher_id"], []).append(r["d"])
+        import bisect
+        for v in fixed_dates.values():
+            v.sort()
+        def base_at(tid, ds):
+            fd = fixed_dates.get(tid, [])
+            ex = exc.get(tid, [])
+            return bisect.bisect_right(fd, ds) + per_day * bisect.bisect_right(ex, ds)
+        final_base = {tid: len(fixed_dates.get(tid, [])) + per_day * len(exc.get(tid, [])) for tid in tids}
+
+        alts = {tid: self.db.teacher_alternate_days(tid, getattr(tby[tid], "alternate_day", -1)) for tid in tids}
+        def pref(tid, ds):
+            t = tby[tid]
+            wd = parse_date(ds).weekday()
+            if t.primary_day == wd:
+                return 0
+            if wd in alts[tid]:
+                return C_ALT * (1 + alts[tid].index(wd))
+            return C_OTHER if t.primary_day >= 0 or alts[tid] else 0
+
+        # Κόμβοι
+        S, T = 0, 1
+        nid = 2
+        day_node = {}
+        for d in days:
+            day_node[d] = nid; nid += 1
+        IN, CUM = {}, {}
+        for tid in tids:
+            for wi in range(nW):
+                IN[tid, wi] = nid; CUM[tid, wi] = nid + 1; nid += 2
+        mcf = MinCostFlow(nid)
+        orig = {}
+        for d in days:
+            mcf.add(S, day_node[d], len(slots_by_day[d]), 0)
+            for i in slots_by_day[d]:
+                orig.setdefault(d, set()).add(rows[i][6])
+        need = len(rows)
+        # Ημέρα → εκπαιδευτικός (εβδομάδα)
+        for d in days:
+            wi = widx[wkey(d)]
+            dd = parse_date(d)
+            for tid in tids:
+                if (tid, d) in fixed_day:
+                    continue
+                ok = tby[tid].available_on(dd.weekday()) and not self._is_absent(tid, dd)
+                if ok:
+                    mcf.add(day_node[d], IN[tid, wi], 1, pref(tid, d))
+                elif tid in orig.get(d, ()):
+                    mcf.add(day_node[d], IN[tid, wi], 1, BIG)     # μόνο ως έσχατη λύση, όπως η αρχική κατανομή
+        # Εβδομαδιαίο πλήθος
+        for tid in tids:
+            xc = bool(tby[tid].extra_cycle)
+            for wi, w in enumerate(weeks):
+                f = fixed_week.get((tid, w), 0)
+                for j in range(1, 6):
+                    c = f + j
+                    cost = 0 if c <= 1 else (C_SECOND if (c == 2 and xc) else BIG)
+                    mcf.add(IN[tid, wi], CUM[tid, wi], 1, cost)
+        # Σωρευτικά σύνολα (κυρτό κόστος: τετράγωνο του συνόλου) — κάθε εβδομάδα και στο τέλος
+        cum_slots = 0
+        for wi in range(nW):
+            cum_slots += sum(len(slots_by_day[d]) for d in days if widx[wkey(d)] == wi)
+            last = (wi == nW - 1)
+            W = C_FINAL if last else C_CUM
+            maxu = sum(1 for d in days if widx[wkey(d)] <= wi)
+            Bs = {tid: (final_base[tid] if last else base_at(tid, week_end[wi])) for tid in tids}
+            M = (sum(Bs.values()) + cum_slots) / len(tids)        # μέσο σωρευτικό σύνολο εκείνη την εβδομάδα
+            for tid in tids:
+                B = Bs[tid]
+                u = CUM[tid, wi]
+                v = T if last else CUM[tid, wi + 1]
+                def marg(j):          # κόστος της j-οστής μονάδας: (B+j)^2 - (B+j-1)^2
+                    return int(round(W * (2 * (B + j) - 1) * 4))
+                # Οι μονάδες πολύ κάτω από τον μέσο όρο μπαίνουν σε ένα τόξο με το (μικρότερο) κόστος της 1ης·
+                # έτσι η καμπύλη μένει κυρτή και όποιος υστερεί πολύ προτιμάται πάντα.
+                L = min(maxu, max(0, int(M - B) - 10))
+                if L:
+                    mcf.add(u, v, L, max(0, marg(1)))
+                hi = min(maxu, L + 24)
+                for j in range(L + 1, hi + 1):
+                    mcf.add(u, v, 1, max(0, marg(j)))
+                if maxu > hi:
+                    mcf.add(u, v, maxu - hi, max(0, marg(hi + 1)) + BIG // 100)
+        got = mcf.solve(S, T, need, deadline=t0 + time_limit)
+        if got < need:
+            LOG.warning("Βελτιστοποίηση ισοκατανομής: δεν δρομολογήθηκαν όλες οι θέσεις (%s/%s)", got, need)
+            return rows, 0, None
+        # Ανάγνωση λύσης
+        chosen: Dict[str, List[int]] = {d: [] for d in days}
+        inv_in = {v: k for k, v in IN.items()}
+        for d in days:
+            for e in mcf.g[day_node[d]]:
+                if e[0] in inv_in and e[3][1] > 0 and e[2] >= 0:
+                    chosen[d].append(inv_in[e[0]][0])
+        if any(len(chosen[d]) != len(slots_by_day[d]) for d in days):
+            LOG.warning("Βελτιστοποίηση ισοκατανομής: ασυνεπής λύση· κρατιέται η αρχική κατανομή")
+            return rows, 0, None
+        new_rows = list(rows)
+        changes = 0
+        for d in days:
+            idxs = slots_by_day[d]
+            pool = list(chosen[d])
+            free = []
+            for i in idxs:                       # όποιος έμεινε στην ίδια ημέρα κρατά και τον τομέα του
+                if rows[i][6] in pool:
+                    pool.remove(rows[i][6])
+                else:
+                    free.append(i)
+            for i, tid in zip(free, pool):
+                r = rows[i]
+                new_rows[i] = (r[0], r[1], r[2], r[3], r[4], r[5], tid, r[7], r[8])
+                changes += 1
+
+        def spread(rs):
+            tot = dict(final_base)
+            for r in rs:
+                tot[r[6]] = tot.get(r[6], 0) + 1
+            vals = [tot[t] for t in tids]
+            return round(max(vals) - min(vals), 1)
+        return new_rows, changes, (spread(rows), spread(new_rows))
+
+    def weekday_bottlenecks(self, teachers: List[Teacher], on: Optional[date] = None) -> List[str]:
+        """Ημέρες της εβδομάδας με λίγους διαθέσιμους σε σχέση με τους τομείς: όσοι είναι διαθέσιμοι εκείνες τις
+        ημέρες κάνουν αναγκαστικά περισσότερες εφημερίες (η διαφορά δεν διορθώνεται από τον αλγόριθμο,
+        μόνο αν δηλωθούν περισσότεροι διαθέσιμοι)."""
+        k = max(1, len(self.db.areas(True)))
+        n = max(1, len(teachers))
+        avg_days = sum(sum(1 for wd in range(5) if t.available_on(wd)) for t in teachers) / n or 5
+        fair = (5 * k / n) / avg_days            # αναμενόμενο ποσοστό ημερών ανά διαθέσιμη ημέρα
+        out = []
+        for wd in range(5):
+            av = [t for t in teachers if t.available_on(wd) and not (on and self._is_absent(t.id, on))]
+            if not av:
+                out.append(f"{DAYS_GR[wd]}: κανείς διαθέσιμος για {k} τομείς.")
+                continue
+            load = k / len(av)
+            if load >= 0.6 and load > 1.25 * fair:
+                names = ", ".join(t.name for t in av)
+                out.append(f"{DAYS_GR[wd]}: {k} τομείς αλλά μόνο {len(av)} διαθέσιμοι ({names}) — κάνουν εφημερία το {min(100, round(100 * load))}% των ημερών αυτών, "
+                           f"έναντι περίπου {round(100 * fair)}% που αναλογεί.")
+        return out
 
     def daily_fairness_state(self, teachers: List[Teacher]) -> Tuple[Dict[int, int], Dict[int, int]]:
         """Επιστρέφει πραγματικές ημέρες εφημερίας και πλήθος πρόσθετων εβδομαδιαίων εφημεριών.
@@ -3276,11 +3567,21 @@ class EfimeriesApp:
                         rows.append((d.isoformat(), DAYS_GR[weekday], interval["name"], interval["start_time"], interval["end_time"], area_name, teacher.id, mins, mode))
 
         balance_changes = 0
+        opt_changes, opt_spread = 0, None
         balance_delta = 0
         if mode == "daily" and rows:
             rows, balance_changes, balance_delta = self.balance_daily_rows_global(
                 rows, teachers, daily_base_annual_days, generate_from, generate_to
             )
+            try:
+                self._gen_progress_step(1, 1, "Βελτιστοποίηση ισοκατανομής")
+            except Exception:
+                pass
+            try:
+                rows, opt_changes, opt_spread = self.optimize_daily_fairness(rows, teachers, generate_from, generate_to)
+            except Exception:
+                LOG.exception("Αποτυχία βελτιστοποίησης ισοκατανομής")
+                opt_changes, opt_spread = 0, None
         elif mode == "breaks" and rows:
             rows, balance_changes, balance_delta = self.balance_break_rows(rows, teachers, intervals, total_minutes)
 
@@ -3328,8 +3629,29 @@ class EfimeriesApp:
             self.generate_text.insert("end", "Εναλλαγή τομέων: ανά εφημερία εκπαιδευτικού.\n")
             if balance_changes:
                 self.generate_text.insert("end", f"Συνολική εξισορρόπηση υπολοίπου έτους: {balance_changes} διορθωτικές μετακινήσεις.\n")
+            if opt_spread:
+                self.generate_text.insert("end", f"Βελτιστοποίηση ισοκατανομής (σε κάθε εβδομάδα και στο τέλος του έτους): {opt_changes} αλλαγές.\n")
+            try:
+                bn = self.weekday_bottlenecks(teachers, generate_from)
+            except Exception:
+                bn = []
+            if bn:
+                self.generate_text.insert("end", "\nΠΡΟΣΟΧΗ — ημέρες με λίγους διαθέσιμους (εξηγούν γιατί κάποιοι έχουν προσωρινά περισσότερες εφημερίες):\n"
+                                          + "".join("  • " + x + "\n" for x in bn)
+                                          + "  Λύση: δηλώστε περισσότερους διαθέσιμους αυτές τις ημέρες (Εκπαιδευτικοί → Ημέρες).\n")
+            if opt_changes:
+                # μετά τη βελτιστοποίηση: «πρόσθετη» = δεύτερη εφημερία της ίδιας εβδομάδας (με τις κλειδωμένες)
+                _names = {t.id: t.name for t in teachers}
+                _wk: Dict[tuple, Dict[int, int]] = {}
+                for _r in [tuple(x) for x in self.db.conn.execute(
+                        "SELECT d,'','','','','',teacher_id FROM assignments WHERE mode='daily' AND d BETWEEN ? AND ?",
+                        (generate_from.isoformat(), generate_to.isoformat())).fetchall()]:
+                    _d = parse_date(_r[0]); _m = _d - timedelta(days=_d.weekday())
+                    _c = _wk.setdefault((_m,), {}); _c[_r[6]] = _c.get(_r[6], 0) + 1
+                daily_extra_log = [f"{fmt_date(m)}: " + ", ".join(_names.get(t, "?") for t, c in sorted(cs.items()) if c >= 2)
+                                   for (m,), cs in sorted(_wk.items()) if any(c >= 2 for c in cs.values())]
             if daily_extra_log:
-                self.generate_text.insert("end", "Πρόσθετες εφημερίες που τοποθετήθηκαν:\n")
+                self.generate_text.insert("end", "Πρόσθετες εφημερίες (δεύτερη εφημερία μέσα στην εβδομάδα):\n")
                 for line in daily_extra_log:
                     self.generate_text.insert("end", f"• {line}\n")
         elif mode == "shifts":

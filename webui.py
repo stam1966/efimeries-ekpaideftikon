@@ -714,7 +714,7 @@ class WebUI:
         inper: Dict[str, int] = {}
         for r in self._duty_rows(a, z):
             inper[r["teacher"]] = inper.get(r["teacher"], 0) + 1
-        names = sorted({t.name for t in self.db.teachers() if t.active} | set(done) | set(inper), key=lambda n: n.casefold())
+        names = sorted({t.name for t in self.db.teachers() if t.active and t.participates} | {n for n, v in done.items() if v} | set(inper), key=lambda n: n.casefold())
         title = (f"Πραγματοποιημένες εφημερίες από την αρχή του σχολικού έτους "
                  f"({self.mod.fmt_date(start.isoformat())} έως {'σήμερα' if until == today else self.mod.fmt_date(until.isoformat())})")
         return title, [(n, done.get(n, 0), inper.get(n, 0)) for n in names]
@@ -735,8 +735,73 @@ class WebUI:
         if who.startswith("teacher:"):
             return [int(who.split(":", 1)[1])]
         if who == "each":
-            return [t.id for t in self.db.teachers() if t.active]
+            return [t.id for t in self.db.teachers() if t.active and t.participates]
         return []
+
+    def _totals_html(self, a: date, z: date, esc, fmt) -> str:
+        """«Σύνολα»: για κάθε εκπαιδευτικό που συμμετέχει — πραγματοποιημένες, προγραμματισμένες, σύνολο έτους,
+        πίστωση για ημέρες χωρίς αναπλήρωση, απόκλιση από τον μέσο όρο και κατανομή ανά ημέρα εβδομάδας."""
+        app, db = self.app, self.db
+        today = date.today().isoformat()
+        start, end = db.get_setting("start_date", ""), db.get_setting("end_date", "")
+        teachers = db.active_teachers()
+        rows = db.conn.execute("SELECT teacher_id, d, locked FROM assignments WHERE teacher_id IS NOT NULL AND d BETWEEN ? AND ?",
+                               (start or "0000", end or "9999")).fetchall()
+        mode = db.get_setting("mode", "daily")
+        credit = app.fair_credit(teachers, "days" if mode == "daily" else "shifts" if mode == "shifts" else "days")
+        st: Dict[int, dict] = {t.id: {"done": 0, "plan": 0, "per": 0, "wd": [0] * 5} for t in teachers}
+        for r in rows:
+            x = st.get(r["teacher_id"])
+            if x is None:
+                continue
+            if r["d"] < today or int(r["locked"] or 0) and r["d"] <= today:
+                x["done"] += 1
+            else:
+                x["plan"] += 1
+            if a.isoformat() <= r["d"] <= z.isoformat():
+                x["per"] += 1
+            wd = date.fromisoformat(r["d"]).weekday()
+            if wd < 5:
+                x["wd"][wd] += 1
+        if not st:
+            return "<p>Δεν υπάρχουν εκπαιδευτικοί που συμμετέχουν στις εφημερίες.</p>"
+        eff = {tid: v["done"] + v["plan"] + credit.get(tid, 0) for tid, v in st.items()}
+        mean = sum(eff.values()) / len(eff)
+        effd = {tid: v["done"] + credit_to_date for tid, v, credit_to_date in
+                ((tid, v, self._credit_until(tid, today)) for tid, v in st.items())}
+        meand = sum(effd.values()) / len(effd)
+        tby = {t.id: t for t in teachers}
+        order = sorted(st, key=lambda tid: tby[tid].name.casefold())
+        def sgn(x):
+            x = round(x, 1)
+            return ("+" if x > 0 else "") + (f"{x:.1f}".replace(".", ",") if x != int(x) else str(int(x)))
+        h = ("<table class='tt'><tr><th>#</th><th>Εκπαιδευτικός</th><th class='c'>Πραγματο-<br>ποιημένες</th><th class='c'>Απόκλιση<br>έως σήμερα</th>"
+             "<th class='c'>Προγραμμα-<br>τισμένες</th><th class='c'>Σύνολο<br>έτους</th><th class='c'>Πίστωση<br>απουσιών*</th><th class='c'>Απόκλιση<br>τέλους έτους</th>"
+             f"<th class='c'>Στο διάστημα<br>{fmt(a.isoformat())[:5]}–{fmt(z.isoformat())[:5]}</th>"
+             + "".join(f"<th class='c d'>{d}</th>" for d in ("Δε", "Τρ", "Τε", "Πε", "Πα")) + "</tr>")
+        for i, tid in enumerate(order, 1):
+            v = st[tid]
+            cr = credit.get(tid, 0)
+            h += (f"<tr><td class='c'>{i}</td><td>{esc(tby[tid].name)}</td><td class='c'><b>{v['done']}</b></td><td class='c'>{sgn(effd[tid] - meand)}</td>"
+                  f"<td class='c'>{v['plan']}</td><td class='c'><b>{v['done'] + v['plan']}</b></td><td class='c'>{sgn(cr) if cr else ''}</td>"
+                  f"<td class='c'>{sgn(eff[tid] - mean)}</td><td class='c'>{v['per']}</td>"
+                  + "".join(f"<td class='c d'>{n or ''}</td>" for n in v["wd"]) + "</tr>")
+        tot_done = sum(v["done"] for v in st.values()); tot_plan = sum(v["plan"] for v in st.values())
+        h += (f"<tr class='sum'><td></td><td>Σύνολο</td><td class='c'>{tot_done}</td><td></td><td class='c'>{tot_plan}</td><td class='c'>{tot_done + tot_plan}</td>"
+              f"<td></td><td></td><td class='c'>{sum(v['per'] for v in st.values())}</td>"
+              + "".join(f"<td class='c d'>{sum(v['wd'][k] for v in st.values())}</td>" for k in range(5)) + "</tr></table>")
+        h += ("<p class='note'>* Πίστωση απουσιών: για τις ημέρες χωρίς αναπλήρωση (π.χ. μακροχρόνια άδεια) λογαριάζεται ο μέσος όρος των συναδέλφων, "
+              "ώστε κανείς να μη «χρωστά» εφημερίες. Οι αποκλίσεις υπολογίζονται μαζί με την πίστωση. "
+              "Οι στήλες Δε–Πα δείχνουν σε ποιες ημέρες της εβδομάδας πέφτουν οι εφημερίες όλου του έτους.</p>")
+        return h
+
+    def _credit_until(self, tid: int, ds: str) -> float:
+        cache = getattr(self, "_exc_cache", None)
+        if cache is None:
+            ts = self.db.active_teachers()
+            self._exc_cache = cache = (self.app.excused_dates([t.id for t in ts]), max(1, len(self.db.areas(True))) / max(1, len(ts)))
+        dates, per_day = cache
+        return per_day * sum(1 for d in dates.get(tid, []) if d < ds)
 
     def api_print(self, p, b):
         a, z = self._d(p.get("from", "")), self._d(p.get("to", ""))
@@ -762,7 +827,15 @@ class WebUI:
                       + (f"<td>{esc(r['teacher'])}</td>" if show_teacher else "") + f"<td>{'✔' if int(r['locked'] or 0) else ''}</td></tr>")
                 last = r["d"]
             return h + "</table>"
-        if who == "all" and p.get("fmt", "grid") == "grid":
+        if who == "totals":
+            self._exc_cache = None
+            out[1] = out[1].replace("</style>", ".tt td,.tt th{padding:4px 6px}.tt th{text-align:center;font-size:12px}.tt td.c{text-align:center}.tt th.d,.tt td.d{width:34px;color:#333}"
+                                    ".tt tr.sum td{font-weight:700;background:#f4f4f4}.note{font-size:11px;color:#555;margin-top:8px}"
+                                    "@media print{@page{size:A4 landscape;margin:10mm}}</style>")
+            out.append(f"<h1>{school}</h1><p style='font-size:15px;color:#111'><b>Σύνολα εφημεριών ανά εκπαιδευτικό</b> · σχολικό έτος "
+                       f"{esc(self.db.get_setting('school_year', ''))} · έως σήμερα {fmt(date.today().isoformat())}</p>")
+            out.append(self._totals_html(a, z, esc, fmt))
+        elif who == "all" and p.get("fmt", "grid") == "grid":
             weeks = self._grid_weeks(a, z)
             out[1] = out[1].replace("</style>", ".wk{page-break-inside:avoid;margin-bottom:14px}.wk table{table-layout:fixed}.wk th{text-align:center;background:#d9d9d9}.wk td{text-align:center;height:24px}"
                                     ".done{page-break-inside:avoid;margin-top:16px}.done h3{font-size:14px;margin:0 0 6px}.done .cols{display:flex;gap:14px;align-items:flex-start}.done table{width:auto;flex:1}.done td.c,.done th.c{text-align:center;width:22%}"
