@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 APP_TITLE = "Εφημερίες Εκπαιδευτικών"
-APP_VERSION = "0.75.1"
+APP_VERSION = "0.75.2"
 UPDATE_REPO = "stam1966/efimeries-ekpaideftikon"  # αποθετήριο GitHub από όπου ελέγχονται οι νέες εκδόσεις
 
 # Όρια εργασίας του εβδομαδιαίου σχεδιασμού (προστατεύουν από πολύ αργούς υπολογισμούς σε μεγάλα σχολεία).
@@ -2032,10 +2032,12 @@ class EfimeriesApp:
         else:
             per_day = (len(recs) / dates if dates else max(1, len(db.areas(True)))) / n
         exc = self.excused_dates([t.id for t in teachers])
+        # Το «σύνολο» φτάνει όσο φτάνει το παραγμένο πρόγραμμα· η πίστωση λογαριάζεται έως την ίδια ημερομηνία.
+        last = max((r["d"] for r in recs), default=today)
         for tid, x in st.items():
             ex = exc.get(tid, []) if x["participates"] else []
             x["year"] = x["done"] + x["plan"]
-            x["credit"] = per_day * len(ex)
+            x["credit"] = per_day * sum(1 for d in ex if d <= last)
             x["credit_today"] = per_day * sum(1 for d in ex if d < today)
         part = [x for x in st.values() if x["participates"]]
         mean_today = sum(x["done"] + x["credit_today"] for x in part) / len(part) if part else 0
@@ -2044,7 +2046,7 @@ class EfimeriesApp:
             x["dev_today"] = x["done"] + x["credit_today"] - mean_today
             x["dev_year"] = x["year"] + x["credit"] - mean_year
         rows = sorted(st.values(), key=lambda x: (not x["participates"], x["name"].casefold()))
-        return {"rows": rows, "start": start, "today": today, "mean_today": mean_today, "mean_year": mean_year}
+        return {"rows": rows, "start": start, "end": end, "last": last, "today": today, "mean_today": mean_today, "mean_year": mean_year}
 
     def year_loads(self, teachers=None) -> Dict[int, int]:
         """Ετήσιο φορτίο (λεπτά) για σύγκριση δικαιοσύνης: πραγματικές εφημερίες + συμψηφισμός ημερών χωρίς αναπλήρωση."""
@@ -4350,9 +4352,9 @@ class EfimeriesApp:
         write_xlsx(path, [
             ("Πρόγραμμα", ["Ημερομηνία", "Ημέρα", "Χρόνος", "Από", "Έως", "Τομέας", "Εκπαιδευτικός", "Λεπτά", "Τρόπος", "Κατάσταση"],
              prog, [13, 12, 18, 8, 8, 18, 30, 8, 12, 18]),
-            ("Σύνολα", ["Εκπαιδευτικός", "Πραγματοποιημένες", "Προγραμματισμένες", "Σύνολο έτους", "Λεπτά", "Ώρες",
-                        "Πίστωση απουσιών", "Απόκλιση έως σήμερα", "Απόκλιση τέλους έτους"],
-             tot_rows, [32, 18, 18, 13, 9, 9, 16, 19, 21]),
+            ("Σύνολα", ["Εκπαιδευτικός", "Πραγματοποιημένες (έως σήμερα)", "Προγραμματισμένες", f"Σύνολο έως {fmt_date(dt_['last'])}", "Λεπτά", "Ώρες",
+                        "Πίστωση απουσιών", "Απόκλιση έως σήμερα", f"Απόκλιση έως {fmt_date(dt_['last'])}"],
+             tot_rows, [32, 18, 18, 18, 9, 9, 16, 19, 21]),
             ("Απουσίες", ["Εκπαιδευτικός", "Από", "Έως", "Ημέρες", "Αιτιολογία"], ab_rows, [32, 13, 13, 9, 34]),
         ])
         return True

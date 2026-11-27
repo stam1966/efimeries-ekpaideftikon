@@ -735,8 +735,15 @@ class WebUI:
         def sgn(x):
             x = round(x, 1)
             return ("+" if x > 0 else "") + (f"{x:.1f}".replace(".", ",") if x != int(x) else str(int(x)))
-        h = ("<table class='tt'><tr><th>#</th><th>Εκπαιδευτικός</th><th class='c'>Πραγματο-<br>ποιημένες</th><th class='c'>Απόκλιση<br>έως σήμερα</th>"
-             "<th class='c'>Προγραμμα-<br>τισμένες</th><th class='c'>Σύνολο<br>έτους</th><th class='c'>Πίστωση<br>απουσιών*</th><th class='c'>Απόκλιση<br>τέλους έτους</th>"
+        L = fmt(t["last"])[:5]
+        full = t["last"] >= t["end"] or not any(t["last"] < d.isoformat() <= t["end"] for d in self.app.school_days())
+        h = ""
+        if not full:
+            h += (f"<p class='warn'>Το πρόγραμμα έχει παραχθεί έως <b>{fmt(t['last'])}</b> (το σχολικό έτος τελειώνει {fmt(t['end'])}). "
+                  "Οι στήλες «Σύνολο» και «Απόκλιση» αφορούν έως τότε· για όλο το έτος: Παραγωγή → «Συνέχιση από σήμερα».</p>")
+        h += ("<table class='tt'><tr><th>#</th><th>Εκπαιδευτικός</th><th class='c'>Πραγματο-<br>ποιημένες</th><th class='c'>Απόκλιση<br>έως σήμερα</th>"
+             f"<th class='c'>Προγραμμα-<br>τισμένες</th><th class='c'>Σύνολο<br>{'έτους' if full else 'έως ' + L}</th><th class='c'>Πίστωση<br>απουσιών*</th>"
+             f"<th class='c'>Απόκλιση<br>{'τέλους έτους' if full else 'έως ' + L}</th>"
              f"<th class='c'>Στο διάστημα<br>{fmt(a.isoformat())[:5]}–{fmt(z.isoformat())[:5]}</th>"
              + "".join(f"<th class='c d'>{d}</th>" for d in ("Δε", "Τρ", "Τε", "Πε", "Πα")) + "</tr>")
         for i, x in enumerate(rows, 1):
@@ -751,7 +758,8 @@ class WebUI:
         h += ("<p class='note'>* Πίστωση απουσιών: για τις ημέρες χωρίς αναπλήρωση (π.χ. μακροχρόνια άδεια) λογαριάζεται ο μέσος όρος των συναδέλφων, "
               "ώστε κανείς να μη «χρωστά» εφημερίες. Οι αποκλίσεις υπολογίζονται μαζί με την πίστωση. «Πραγματοποιημένες»: έως και χθες "
               "(και οι σημερινές, αν έχουν κλειδωθεί). Οι ίδιοι αριθμοί εμφανίζονται στο πλέγμα και στο Excel. "
-              "Οι στήλες Δε–Πα δείχνουν σε ποιες ημέρες της εβδομάδας πέφτουν οι εφημερίες όλου του έτους.</p>")
+              "«Στο διάστημα»: μόνο οι ημερομηνίες της εκτύπωσης. Οι στήλες Δε–Πα δείχνουν σε ποιες ημέρες της εβδομάδας πέφτουν όλες οι εφημερίες του έτους "
+              "(πραγματοποιημένες και προγραμματισμένες), όχι μόνο του διαστήματος.</p>")
         return h
 
     def api_print(self, p, b):
@@ -780,7 +788,7 @@ class WebUI:
             return h + "</table>"
         if who == "totals":
             out[1] = out[1].replace("</style>", ".tt td,.tt th{padding:4px 6px}.tt th{text-align:center;font-size:12px}.tt td.c{text-align:center}.tt th.d,.tt td.d{width:34px;color:#333}"
-                                    ".tt tr.sum td{font-weight:700;background:#f4f4f4}.note{font-size:11px;color:#555;margin-top:8px}"
+                                    ".tt tr.sum td{font-weight:700;background:#f4f4f4}.note{font-size:11px;color:#555;margin-top:8px}.warn{font-size:12px;background:#fff6e0;border:1px solid #e8c873;padding:6px 10px;border-radius:6px}"
                                     "@media print{@page{size:A4 landscape;margin:10mm}}</style>")
             out.append(f"<h1>{school}</h1><p style='font-size:15px;color:#111'><b>Σύνολα εφημεριών ανά εκπαιδευτικό</b> · σχολικό έτος "
                        f"{esc(self.db.get_setting('school_year', ''))} · έως σήμερα {fmt(date.today().isoformat())}</p>")
