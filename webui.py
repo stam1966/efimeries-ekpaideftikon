@@ -88,7 +88,10 @@ class WebUI:
         self.bye_at = 0.0
         self.update_rel: Optional[dict] = None
         self.dl: Dict[str, Any] = {"state": "idle", "done": 0, "total": 0}
-        self.direct: Dict[str, Callable] = {"/api/update/check": self.api_update_check, "/api/update/install": self.api_update_install, "/api/update/status": self.api_update_status}
+        self.direct: Dict[str, Callable] = {"/api/update/check": self.api_update_check, "/api/update/install": self.api_update_install, "/api/update/status": self.api_update_status,
+                                            "/api/dialog": self.api_dialog}
+        self._dialog_lock = threading.Lock()
+        self._exists_cache: Dict[str, tuple] = {}
         self.started = time.time()
         self.port = 0
         self._server: Optional[ThreadingHTTPServer] = None
@@ -223,6 +226,7 @@ class WebUI:
         try:
             while True:
                 path, method, params, body, ev, box = self.q.get_nowait()
+                t0 = time.monotonic()
                 try:
                     box["res"] = self.dispatch(path, method, params, body)
                 except ApiError as e:
@@ -234,6 +238,9 @@ class WebUI:
                         pass
                     box["err"] = ApiError(f"{e}", 500)
                     sys.stderr.write(traceback.format_exc())
+                dt = time.monotonic() - t0
+                if dt > 3:
+                    self.mod.LOG.warning("Αργή ενέργεια: %s %.1f δευτ.", path, dt)
                 ev.set()
         except queue.Empty:
             pass
@@ -345,7 +352,7 @@ class WebUI:
             "update": self.update_info(),
             "auto_update": self.app._update_state().get("auto", True) is not False,
             "can_undo": bool(app.__dict__.get("_undo_stack")),
-            "recent": [{"path": f, "name": os.path.basename(f), "exists": os.path.isfile(f)} for f in self.mod.recent_files()],
+            "recent": [{"path": f, "name": os.path.basename(f), "exists": self._exists(f)} for f in self.mod.recent_files()],
             "fair": sorted(({"name": t.name, "minutes": sums.get(t.id, 0), "credit": credit.get(t.id, 0)} for t in teachers), key=lambda x: (-(x["minutes"] + x["credit"]), x["name"])),
         }
 
@@ -1169,6 +1176,43 @@ class WebUI:
         return {"root": str(root), "db": dbp, "installed": installed, "local": root == m.app_dir(),
                 "teachers": c.execute("SELECT COUNT(*) FROM teachers").fetchone()[0], "assignments": c.execute("SELECT COUNT(*) FROM assignments").fetchone()[0]}
 
+    def _exists(self, f: str) -> bool:
+        """Υπάρχει το αρχείο; Για διαδρομές δικτύου/USB ο έλεγχος μπορεί να καθυστερήσει δευτερόλεπτα όταν ο άλλος
+        υπολογιστής είναι κλειστός — γι' αυτό δεν ελέγχονται σε κάθε σελίδα (κρυφή μνήμη 5 λεπτών, και καθόλου για \\δίκτυο)."""
+        if f.startswith(("\\\\", "//")):
+            return True
+        hit = self._exists_cache.get(f)
+        now = time.time()
+        if hit and now - hit[1] < 300:
+            return hit[0]
+        ok = os.path.isfile(f)
+        self._exists_cache[f] = (ok, now)
+        return ok
+
+    def api_dialog(self, p, b):
+        """Παράθυρα Άνοιγμα / Αποθήκευση ως / Επιλογή φακέλου των Windows. Τρέχουν στο νήμα του αιτήματος — ΟΧΙ στον κύριο
+        βρόχο της εφαρμογής — ώστε, όσο είναι ανοιχτό το παράθυρο (ή αν κρυφτεί πίσω από το παράθυρο της εφαρμογής),
+        η εφαρμογή να μην «κολλάει». Δεν αγγίζει τη βάση δεδομένων."""
+        kind = str(b.get("kind") or "")
+        initdir = str(b.get("initialdir") or "")
+        if initdir and not os.path.isdir(initdir):
+            initdir = ""
+        if not initdir:
+            initdir = str(Path.home() / "Documents")
+        with self._dialog_lock:
+            if kind == "folder":
+                return {"path": self.mod.pick_folder(str(b.get("title") or "Επιλογή φακέλου"), initdir) or ""}
+            if kind in ("save", "open"):
+                return {"path": self.mod.pick_file(kind == "save", str(b.get("title") or ("Αποθήκευση ως" if kind == "save" else "Άνοιγμα")),
+                                                   initdir, str(b.get("initialfile") or "")) or ""}
+        raise ApiError("Άγνωστο παράθυρο")
+
+    def api_file_saveto(self, p, b):
+        path = str(b.get("path") or "").strip()
+        if not path:
+            raise ApiError("Δεν δόθηκε αρχείο")
+        return self._save_to(path)
+
     def api_storage_browse(self, p, b):
         sel = self.mod.pick_folder("Επιλογή φακέλου κοινόχρηστων δεδομένων", str(self.mod.STORAGE_ROOT))
         return {"path": sel or ""}
@@ -1402,7 +1446,7 @@ class WebUI:
         rec = self.mod.recent_files()
         if rec and os.path.isdir(os.path.dirname(rec[0])):
             return self._save_to(rec[0])
-        return self.api_file_saveas(p, b)
+        return {"saved": False, "need_dialog": True}
 
     def _file_bytes(self, path: str) -> bytes:
         f = Path(path)

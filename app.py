@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 APP_TITLE = "Εφημερίες Εκπαιδευτικών"
-APP_VERSION = "0.75.2"
+APP_VERSION = "0.75.3"
 UPDATE_REPO = "stam1966/efimeries-ekpaideftikon"  # αποθετήριο GitHub από όπου ελέγχονται οι νέες εκδόσεις
 
 # Όρια εργασίας του εβδομαδιαίου σχεδιασμού (προστατεύουν από πολύ αργούς υπολογισμούς σε μεγάλα σχολεία).
@@ -1106,7 +1106,108 @@ class _Dialogs:
 messagebox = _Dialogs()
 
 
+def _win_owner() -> int:
+    """Το παράθυρο της εφαρμογής (Edge) που είναι μπροστά: ο διάλογος γίνεται «παιδί» του και εμφανίζεται από πάνω."""
+    try:
+        import ctypes
+        return int(ctypes.windll.user32.GetForegroundWindow() or 0)
+    except Exception:
+        return 0
+
+
+def win_file_dialog(save: bool, title: str, initialdir: str = "", initialfile: str = "") -> Optional[str]:
+    """Εγγενές παράθυρο Άνοιγμα/Αποθήκευση των Windows (comdlg32). None = δεν είναι διαθέσιμο (π.χ. όχι Windows)."""
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class OFN(ctypes.Structure):
+            _fields_ = [("lStructSize", wintypes.DWORD), ("hwndOwner", wintypes.HWND), ("hInstance", wintypes.HINSTANCE),
+                        ("lpstrFilter", wintypes.LPCWSTR), ("lpstrCustomFilter", wintypes.LPWSTR), ("nMaxCustFilter", wintypes.DWORD),
+                        ("nFilterIndex", wintypes.DWORD), ("lpstrFile", wintypes.LPWSTR), ("nMaxFile", wintypes.DWORD),
+                        ("lpstrFileTitle", wintypes.LPWSTR), ("nMaxFileTitle", wintypes.DWORD), ("lpstrInitialDir", wintypes.LPCWSTR),
+                        ("lpstrTitle", wintypes.LPCWSTR), ("Flags", wintypes.DWORD), ("nFileOffset", wintypes.WORD),
+                        ("nFileExtension", wintypes.WORD), ("lpstrDefExt", wintypes.LPCWSTR), ("lCustData", wintypes.LPARAM),
+                        ("lpfnHook", ctypes.c_void_p), ("lpTemplateName", wintypes.LPCWSTR), ("pvReserved", ctypes.c_void_p),
+                        ("dwReserved", wintypes.DWORD), ("FlagsEx", wintypes.DWORD)]
+        buf = ctypes.create_unicode_buffer(re.sub(r'[\\/:*?"<>|]+', " ", initialfile or ""), 4096)
+        flt = ctypes.create_unicode_buffer("Αρχείο Εφημεριών (*.efbackup)\0*.efbackup\0Όλα τα αρχεία (*.*)\0*.*\0\0", 160)
+        try:
+            ctypes.windll.ole32.OleInitialize(None)
+        except Exception:
+            pass
+        o = OFN()
+        o.lStructSize = ctypes.sizeof(OFN)
+        o.hwndOwner = _win_owner()
+        o.lpstrFilter = ctypes.cast(flt, wintypes.LPCWSTR)
+        o.nFilterIndex = 1
+        o.lpstrFile = ctypes.cast(buf, wintypes.LPWSTR)
+        o.nMaxFile = 4096
+        o.lpstrInitialDir = initialdir or None
+        o.lpstrTitle = title
+        o.lpstrDefExt = "efbackup"
+        # OFN_EXPLORER | OFN_NOCHANGEDIR | OFN_PATHMUSTEXIST | (OVERWRITEPROMPT ή FILEMUSTEXIST)
+        o.Flags = 0x80000 | 0x8 | 0x800 | (0x2 if save else 0x1000)
+        fn = ctypes.windll.comdlg32.GetSaveFileNameW if save else ctypes.windll.comdlg32.GetOpenFileNameW
+        if fn(ctypes.byref(o)):
+            return buf.value
+        err = ctypes.windll.comdlg32.CommDlgExtendedError()
+        if err:                      # σφάλμα του παραθύρου (όχι «Άκυρο») → εναλλακτικό παράθυρο
+            LOG.warning("Παράθυρο αρχείου: σφάλμα %s", err)
+            return None
+        return ""
+    except Exception:
+        LOG.exception("Αποτυχία εγγενούς παραθύρου αρχείου")
+        return None
+
+
+def win_folder_dialog(title: str, initialdir: str = "") -> Optional[str]:
+    """Εγγενές παράθυρο επιλογής φακέλου των Windows (SHBrowseForFolder, νέα μορφή). None = μη διαθέσιμο."""
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+        ctypes.windll.ole32.OleInitialize(None)
+        CB = ctypes.WINFUNCTYPE(ctypes.c_int, wintypes.HWND, ctypes.c_uint, wintypes.LPARAM, wintypes.LPARAM)
+
+        def _cb(hwnd, msg, lp, data):
+            if msg == 1 and initialdir:                               # BFFM_INITIALIZED → BFFM_SETSELECTIONW
+                ctypes.windll.user32.SendMessageW(hwnd, 0x467, 1, ctypes.c_wchar_p(initialdir))
+            return 0
+        cb = CB(_cb)
+
+        class BI(ctypes.Structure):
+            _fields_ = [("hwndOwner", wintypes.HWND), ("pidlRoot", ctypes.c_void_p), ("pszDisplayName", wintypes.LPWSTR),
+                        ("lpszTitle", wintypes.LPCWSTR), ("ulFlags", ctypes.c_uint), ("lpfn", CB), ("lParam", wintypes.LPARAM),
+                        ("iImage", ctypes.c_int)]
+        disp = ctypes.create_unicode_buffer(260)
+        bi = BI(hwndOwner=_win_owner(), pidlRoot=None, pszDisplayName=ctypes.cast(disp, wintypes.LPWSTR), lpszTitle=title,
+                ulFlags=0x1 | 0x10 | 0x40, lpfn=cb, lParam=0, iImage=0)   # RETURNONLYFSDIRS | EDITBOX | NEWDIALOGSTYLE
+        shell = ctypes.windll.shell32
+        shell.SHBrowseForFolderW.restype = ctypes.c_void_p
+        pidl = shell.SHBrowseForFolderW(ctypes.byref(bi))
+        if not pidl:
+            return ""
+        out = ctypes.create_unicode_buffer(1024)
+        ok = shell.SHGetPathFromIDListW(ctypes.c_void_p(pidl), out)
+        ctypes.windll.ole32.CoTaskMemFree(ctypes.c_void_p(pidl))
+        return out.value if ok else ""
+    except Exception:
+        LOG.exception("Αποτυχία εγγενούς παραθύρου φακέλου")
+        return None
+
+
 def pick_folder(title: str = "Επιλογή φακέλου", initialdir: str = "") -> str:
+    r = win_folder_dialog(title, initialdir)
+    if r is not None:
+        return r
+    return _tk_pick_folder(title, initialdir)
+
+
+def _tk_pick_folder(title: str = "Επιλογή φακέλου", initialdir: str = "") -> str:
     """Παράθυρο επιλογής φακέλου των Windows (το μόνο σημείο που χρησιμοποιεί ακόμη το tkinter)."""
     try:
         import tkinter as _tk
@@ -1128,6 +1229,9 @@ def pick_folder(title: str = "Επιλογή φακέλου", initialdir: str = 
 
 def pick_file(save: bool, title: str, initialdir: str = "", initialfile: str = "") -> str:
     """Παράθυρο «Άνοιγμα» / «Αποθήκευση ως» των Windows για αρχεία .efbackup."""
+    r = win_file_dialog(save, title, initialdir, initialfile)
+    if r is not None:
+        return r
     try:
         import tkinter as _tk
         from tkinter import filedialog as _fd

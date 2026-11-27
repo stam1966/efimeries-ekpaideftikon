@@ -252,10 +252,17 @@ function goToday(){SV.month=null;SV.goToday=true;location.hash==="#schedule"?rou
 /* ---------------- Αρχείο: Άνοιγμα / Αποθήκευση / Αποθήκευση ως ----------------
    Τα δεδομένα αποθηκεύονται αυτόματα σε κάθε αλλαγή. Η «Αποθήκευση» γράφει επιπλέον όλο το σχολικό έτος σε αρχείο
    .efbackup (π.χ. σε USB ή στο cloud)· το «Άνοιγμα» φέρνει πίσω ένα τέτοιο αρχείο. */
-function fileSave(){guard(async()=>{toast("Αποθήκευση…",1500);const r=await api("/api/file/save",{});if(r.saved){toast("💾 Αποθηκεύτηκε στο «"+r.path+"»",5000);S=await api("/api/state");renderMenubar()}})}
-function fileSaveAs(){guard(async()=>{toast("Διάλεξε πού θα αποθηκευτεί το αρχείο (το παράθυρο ίσως ανοίξει πίσω από την εφαρμογή)…",4000);const r=await api("/api/file/saveas",{});if(r.saved){toast("💾 Αποθηκεύτηκε στο «"+r.path+"»",5000);S=await api("/api/state");renderMenubar()}})}
-function fileOpen(path){guard(async()=>{if(typeof path!=="string"){path="";toast("Διάλεξε αρχείο .efbackup (το παράθυρο ίσως ανοίξει πίσω από την εφαρμογή)…",4000)}
-  const r=await api("/api/file/pick",path?{path}:{});if(!r.path)return;const i=r.info;
+let DLG=false;   // ένα παράθυρο Windows τη φορά
+function recentDir(){const f=(S&&S.recent||[])[0];return f?f.path.replace(/[\\/][^\\/]*$/,""):""}
+async function winDialog(kind,o){if(DLG){toast("Υπάρχει ήδη ανοιχτό παράθυρο επιλογής — δες στη γραμμή εργασιών των Windows.",5000);return ""}
+  DLG=true;const t=setTimeout(()=>toast("Το παράθυρο επιλογής είναι ανοιχτό. Αν δεν φαίνεται, πάτησε το εικονίδιό του στη γραμμή εργασιών (κάτω).",7000),2500);
+  try{return (await api("/api/dialog",{kind,...o})).path||""}finally{clearTimeout(t);DLG=false}}
+function fileSave(){guard(async()=>{const r=await api("/api/file/save",{});if(r.need_dialog)return fileSaveAs();if(r.saved){toast("💾 Αποθηκεύτηκε στο «"+r.path+"»",5000);S=await api("/api/state");renderMenubar()}})}
+function fileSaveAs(){guard(async()=>{const nm=("Εφημερίες "+(S.school||"")+" "+(S.year||"")).replace(/[\\/:*?"<>|]+/g," ").trim()+".efbackup";
+  const path=await winDialog("save",{title:"Αποθήκευση ως",initialdir:recentDir(),initialfile:nm});if(!path)return;
+  const r=await api("/api/file/saveto",{path});if(r.saved){toast("💾 Αποθηκεύτηκε στο «"+r.path+"»",5000);S=await api("/api/state");renderMenubar()}})}
+function fileOpen(path){guard(async()=>{if(typeof path!=="string"||!path){path=await winDialog("open",{title:"Άνοιγμα αρχείου Εφημεριών",initialdir:recentDir()});if(!path)return}
+  const r=await api("/api/file/pick",{path});if(!r.path)return;const i=r.info;
   const msg="Άνοιγμα του αρχείου «"+r.name+"»\nΣχολικό έτος "+i.school_year+(i.created_at?" · αποθηκεύτηκε "+i.created_at.replace("T"," "):"")+".\n\n"+
     (i.exists?"Τα τωρινά δεδομένα του σχολικού έτους "+i.school_year+" θα ΑΝΤΙΚΑΤΑΣΤΑΘΟΥΝ από το αρχείο. Πριν από αυτό κρατιέται αυτόματο αντίγραφο ασφαλείας (Αρχείο → Αντίγραφα ασφαλείας).":"Το σχολικό έτος "+i.school_year+" θα προστεθεί και θα ανοίξει.")+
     (i.newer?"\n\nΠροσοχή: το αρχείο έγινε από νεότερη έκδοση ("+i.app_version+").":"")+"\n\nΝα συνεχιστεί;";
@@ -859,7 +866,7 @@ TAB.storage=async v=>{
   async function apply(e,copy){await guard(async()=>{
     const r=await api("/api/storage/set",{path:inp.value.trim(),copy});toast(r.changed?"Ο φάκελος δεδομένων άλλαξε.":"Δεν έγινε αλλαγή.");
     if(r.messages&&r.messages.length)alert(r.messages.join("\n\n"));S=await api("/api/state");route()},e.currentTarget)}
-  const browse=h("button",{class:"btn",onclick:e=>guard(async()=>{const r=await api("/api/storage/browse",{});if(r.path){inp.value=r.path.replace(/\//g,"\\");check()}},e.currentTarget)},"Αναζήτηση…");
+  const browse=h("button",{class:"btn",onclick:e=>guard(async()=>{const path=await winDialog("folder",{title:"Επιλογή φακέλου κοινόχρηστων δεδομένων",initialdir:inp.value||""});if(path){inp.value=path.replace(/\//g,"\\");check()}},e.currentTarget)},"Αναζήτηση…");
   inp.oninput=()=>{clearTimeout(tmr);tmr=setTimeout(check,500)};
   v.append(h("div",{class:"card"},h("h2",{},"Πού αποθηκεύονται τα δεδομένα"),
     h("p",{style:"margin:0 0 4px"},h("b",{},s.root)),
