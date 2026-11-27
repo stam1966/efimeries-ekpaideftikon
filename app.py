@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 APP_TITLE = "Εφημερίες Εκπαιδευτικών"
-APP_VERSION = "0.74.0"
+APP_VERSION = "0.75.0"
 UPDATE_REPO = "stam1966/efimeries-ekpaideftikon"  # αποθετήριο GitHub από όπου ελέγχονται οι νέες εκδόσεις
 
 # Όρια εργασίας του εβδομαδιαίου σχεδιασμού (προστατεύουν από πολύ αργούς υπολογισμούς σε μεγάλα σχολεία).
@@ -2679,7 +2679,7 @@ class EfimeriesApp:
         w_week = max(1, self.rule_weight("w_fair_week"))
         w_day = max(0, self.rule_weight("w_day"))
         C_CUM, C_FINAL = 2 * w_week, 8 * w_year          # κόστος (τετράγωνα) σωρευτικών / τελικών συνόλων
-        C_ALT, C_OTHER, C_SECOND = 4 * w_day, 12 * w_day, 40
+        C_ALT, C_OTHER, C_SECOND = 4 * w_day, 24 * w_day, 40      # κάθε επόμενη προτίμηση +C_ALT· ημέρα χωρίς αριθμό: C_OTHER
         BIG = 10 ** 6
 
         def wkey(ds):

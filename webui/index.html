@@ -92,6 +92,8 @@ th{text-align:left;color:var(--muted);font-size:12px;font-weight:700;padding:8px
 td{padding:9px 10px;border-bottom:1px solid var(--line)}
 tr.clk{cursor:pointer}
 tr.clk:hover td{background:var(--panel2)}
+.rank{display:inline-flex;gap:4px;flex-wrap:wrap}.rk{font-size:12px;padding:1px 7px;border-radius:9px;background:var(--warn-soft);color:var(--warn);white-space:nowrap}.rk.first{background:var(--accent);color:#fff;font-weight:600}
+.btn.alt{background:var(--warn-soft);border-color:var(--warn);color:var(--text)}
 .dots{display:inline-flex;gap:3px}
 .dot{width:24px;height:24px;border-radius:7px;display:inline-grid;place-items:center;font-size:11.5px;font-weight:700;background:var(--panel2);border:1px solid var(--line);color:var(--muted)}
 .dot.on{background:var(--accent-soft);color:var(--accent);border-color:transparent}
@@ -442,7 +444,7 @@ async function openAssign(id){
 let TPF="all";
 PAGE.teachers=async v=>{
   const data=(await api("/api/teachers")).teachers;let filter="",pf=TPF;
-  v.append(h("h1",{},"Εκπαιδευτικοί"),h("p",{class:"sub"},"Ημέρες παρουσίας, κύρια και εναλλακτικές ημέρες εφημερίας. Πάτησε μια γραμμή για επεξεργασία."));
+  v.append(h("h1",{},"Εκπαιδευτικοί"),h("p",{class:"sub"},"Ημέρες παρουσίας και ημέρες εφημερίας με σειρά προτίμησης. Πάτησε μια γραμμή για επεξεργασία."));
   const search=h("input",{type:"search",placeholder:"Αναζήτηση…",oninput:e=>{filter=e.target.value.toLowerCase();draw()}});
   const segp=h("div",{class:"seg"},...[["all","Όλοι"],["in","Συμμετέχουν"],["out","Εκτός εφημεριών"]].map(([k,l])=>h("button",{class:pf===k?"on":"",onclick:e=>{pf=TPF=k;segp.querySelectorAll("button").forEach(b=>b.classList.remove("on"));e.currentTarget.classList.add("on");draw()}},l)));
   v.append(h("div",{class:"row",style:"margin-bottom:12px;flex-wrap:wrap"},search,segp,h("div",{class:"sp"}),
@@ -455,10 +457,10 @@ PAGE.teachers=async v=>{
       h("td",{},h("b",{},t.name),(!t.active||!t.participates)?h("span",{class:"chip",style:"margin-left:8px"},!t.active?"ανενεργός/ή":"εκτός εφημεριών"):null,
         (t.date_from||t.date_to)?h("span",{class:"chip acc",style:"margin-left:8px"},(t.date_from?"από "+fmt(t.date_from):"")+(t.date_from&&t.date_to?" ":"")+(t.date_to?"έως "+fmt(t.date_to):"")):null),
       h("td",{},h("span",{class:"dots"},t.days.map((on,i)=>h("span",{class:"dot "+(i===t.primary?"pri":t.alternates.includes(i)?"alt":on?"on":""),title:DAYS[i]},D1[i])))),
-      h("td",{},t.primary>=0?DAYS[t.primary]:"—"),h("td",{},t.alternates.length?t.alternates.map(i=>DAYS[i].slice(0,3)).join(", "):"—"),
+      h("td",{},(()=>{const o=[t.primary,...t.alternates].filter(i=>i>=0);return o.length?h("span",{class:"rank"},...o.map((i,k)=>h("span",{class:"rk"+(k?"":" first"),title:(k+1)+"η προτίμηση"},(k+1)+" "+DAYS[i].slice(0,3)))):"—"})()),
       h("td",{style:"text-align:center",onclick:e=>e.stopPropagation()},(()=>{const c=h("input",{type:"checkbox",title:"Συμμετέχει στις εφημερίες",onchange:e=>guard(async()=>{await api("/api/teacher/participates",{id:t.id,on:e.target.checked});t.participates=e.target.checked?1:0;toast(t.name+(t.participates?": συμμετέχει στις εφημερίες":": εκτός εφημεριών")+". Για να εφαρμοστεί στο πρόγραμμα, κάντε νέα παραγωγή.",6000);draw()})});c.checked=!!t.participates;return c})()),
       h("td",{style:"text-align:right"},t.count+" εφ. · "+t.minutes+"΄",t.credit?h("div",{class:"m",style:"color:var(--muted)",title:"Ημέρες χωρίς αναπλήρωση: λογαριάζεται ο μέσος όρος"},"+ "+t.credit+"΄ μ.ό."):null))));
-    card.replaceChildren(rows.length?h("table",{},h("thead",{},h("tr",{},["Όνομα","Ημέρες","Κύρια","Εναλλακτικές","Εφημερίες","Φόρτος έτους"].map((x,i)=>h("th",{style:i===5?"text-align:right":i===4?"text-align:center":""},x)))),tb):h("div",{class:"empty"},"Δεν βρέθηκαν εκπαιδευτικοί."))}
+    card.replaceChildren(rows.length?h("table",{},h("thead",{},h("tr",{},["Όνομα","Ημέρες","Ημέρες εφημερίας (σειρά προτίμησης)","Εφημερίες","Φόρτος έτους"].map((x,i)=>h("th",{style:i===4?"text-align:right":i===3?"text-align:center":""},x)))),tb):h("div",{class:"empty"},"Δεν βρέθηκαν εκπαιδευτικοί."))}
   draw();
   const lg=h("p",{class:"m",style:"color:var(--muted);margin-top:10px"},"Υπόμνημα: ");
   lg.append(h("span",{class:"dot pri"},"Δ")," κύρια ",h("span",{class:"dot alt"},"Τ")," εναλλακτική ",h("span",{class:"dot on"},"Π")," διαθέσιμος/η ",h("span",{class:"dot"},"Π")," μη διαθέσιμος/η");v.append(lg);
@@ -479,11 +481,15 @@ function editTeacher(t){
       h("p",{class:"m",style:"color:var(--muted)"},"Για αντικαταστάτη ή εκπαιδευτικό που έρχεται ή φεύγει μέσα στη χρονιά. Εκτός αυτού του διαστήματος δεν τοποθετείται σε εφημερία και λογαριάζεται ο μέσος όρος των συναδέλφων, ώστε να μη χρειαστεί να «καλύψει τη διαφορά». Κενό = όλη τη χρονιά."),
       h("h2",{style:"margin-top:16px"},"Ημέρες παρουσίας στο σχολείο"),
       h("div",{class:"row"},DAYS.map((d,i)=>h("button",{class:"btn sm"+(st.days[i]?" pri":""),onclick:()=>{st.days[i]=st.days[i]?0:1;if(!st.days[i]){if(st.primary===i)st.primary=-1;st.alternates=st.alternates.filter(x=>x!==i)}draw()}},d))),
-      h("h2",{style:"margin-top:16px"},"Κύρια ημέρα εφημερίας"),
-      h("div",{class:"row"},h("button",{class:"btn sm"+(st.primary===-1?" pri":""),onclick:()=>{st.primary=-1;draw()}},"Καμία"),...DAYS.map((d,i)=>st.days[i]?h("button",{class:"btn sm"+(st.primary===i?" pri":""),onclick:()=>{st.primary=i;st.alternates=st.alternates.filter(x=>x!==i);draw()}},d):null)),
-      h("h2",{style:"margin-top:16px"},"Εναλλακτικές ημέρες (με σειρά προτίμησης)"),
-      h("div",{class:"row"},...DAYS.map((d,i)=>st.days[i]&&i!==st.primary?h("button",{class:"btn sm"+(st.alternates.includes(i)?" pri":""),onclick:()=>{st.alternates=st.alternates.includes(i)?st.alternates.filter(x=>x!==i):[...st.alternates,i];draw()}},(st.alternates.includes(i)?(st.alternates.indexOf(i)+1)+". ":"")+d):null)),
-      h("p",{class:"m",style:"color:var(--muted)"},"Πάτησε με τη σειρά που προτιμάς: ο αριθμός δείχνει τη σειρά προτεραιότητας."),
+      h("h2",{style:"margin-top:16px"},"Ημέρες εφημερίας με σειρά προτίμησης"),
+      (()=>{const ord=[st.primary,...st.alternates].filter(i=>i>=0);
+        const set=o=>{st.primary=o.length?o[0]:-1;st.alternates=o.slice(1);draw()};
+        return h("div",{class:"row",style:"flex-wrap:wrap"},...DAYS.map((d,i)=>{const k=ord.indexOf(i);
+          return h("button",{class:"btn sm"+(k===0?" pri":k>0?" alt":""),style:"min-width:112px",title:k>=0?"Πάτησε για αφαίρεση":"Πάτησε για να μπει "+(ord.length+1)+"η",
+            onclick:()=>{if(k>=0)set(ord.filter(x=>x!==i));else{if(!st.days[i])st.days[i]=1;set([...ord,i])}}},
+            k>=0?h("b",{},(k+1)+"η "):null,d)}),
+          ord.length?h("button",{class:"btn sm",onclick:()=>set([])},"Καθαρισμός"):null)})(),
+      h("p",{class:"m",style:"color:var(--muted)"},"Πάτησε τις ημέρες με τη σειρά που προτιμάς: 1η = κύρια ημέρα, 2η, 3η… = εναλλακτικές. Ο αλγόριθμος βάζει την εφημερία πρώτα στην 1η· όταν χρειαστεί άλλη ημέρα, προτιμά τη 2η, μετά την 3η κ.ο.κ. — όσο μικρότερος ο αριθμός, τόσο μεγαλύτερη η βαρύτητα. Ημέρες χωρίς αριθμό χρησιμοποιούνται μόνο αν δεν γίνεται αλλιώς. Αν διαλέξεις ημέρα που δεν είναι ημέρα παρουσίας, προστίθεται και στις ημέρες παρουσίας."),
       h("div",{class:"row",style:"margin-top:8px"},cb("Συμμετέχει στον κύκλο πρόσθετων εφημεριών",st.extra_cycle,v=>st.extra_cycle=v?1:0)),
       h("label",{class:"f",style:"margin-top:14px"},"Σημειώσεις",notes),
       h("div",{class:"row",style:"margin-top:16px"},h("button",{class:"btn",id:"t-extra",onclick:()=>editTeacherExtra(t)},"Διαθεσιμότητα ανά διάλειμμα και βάρδια…")))}
