@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 APP_TITLE = "Εφημερίες Εκπαιδευτικών"
-APP_VERSION = "0.75.0"
+APP_VERSION = "0.75.1"
 UPDATE_REPO = "stam1966/efimeries-ekpaideftikon"  # αποθετήριο GitHub από όπου ελέγχονται οι νέες εκδόσεις
 
 # Όρια εργασίας του εβδομαδιαίου σχεδιασμού (προστατεύουν από πολύ αργούς υπολογισμούς σε μεγάλα σχολεία).
@@ -1991,6 +1991,60 @@ class EfimeriesApp:
                 day_min = (tot / dates / k) if dates else 0
             per_day = day_min * k / n
         return {t.id: exc.get(t.id, 0) * per_day for t in teachers}
+
+    def duty_totals(self, a: Optional[date] = None, z: Optional[date] = None) -> dict:
+        """ΕΝΙΑΙΟΣ υπολογισμός των συνόλων για όλες τις εκτυπώσεις και τα Excel (Σύνολα, πλέγμα, βιβλίο Excel).
+        «Πραγματοποιημένη» = ημερομηνία πριν από σήμερα, ή σημερινή/παλαιότερη κλειδωμένη, ή καταχωρημένη ως πραγματοποιημένη.
+        Μονάδα = μία εφημερία (μία ανάθεση). Πίστωση για ημέρες χωρίς αναπλήρωση = μέσος όρος εφημεριών ανά σχολική
+        ημέρα / πλήθος συμμετεχόντων, για κάθε τέτοια ημέρα (έως σήμερα και για όλο το έτος).
+        → {"rows": [dict ανά εκπαιδευτικό], "start", "today", "mean_today", "mean_year"}"""
+        db = self.db
+        today = date.today().isoformat()
+        start = db.get_setting("start_date", "") or "0000-01-01"
+        end = db.get_setting("end_date", "") or "9999-12-31"
+        recs = db.conn.execute(
+            "SELECT a.teacher_id, a.d, a.locked, a.entry_type, a.minutes FROM assignments a "
+            "WHERE a.teacher_id IS NOT NULL AND a.d BETWEEN ? AND ?", (start, end)).fetchall()
+        teachers = db.active_teachers()
+        everyone = {t.id: t for t in db.teachers()}
+        ids = [t.id for t in teachers] + sorted({r["teacher_id"] for r in recs} - {t.id for t in teachers})
+        st = {tid: {"id": tid, "name": everyone[tid].name if tid in everyone else "?", "participates": tid in {t.id for t in teachers},
+                    "done": 0, "plan": 0, "per": 0, "minutes": 0, "wd": [0] * 5} for tid in ids}
+        for r in recs:
+            x = st.get(r["teacher_id"])
+            if x is None:
+                continue
+            d = r["d"]
+            if d < today or (d <= today and int(r["locked"] or 0)) or r["entry_type"] == "manual_completed":
+                x["done"] += 1
+            else:
+                x["plan"] += 1
+            x["minutes"] += int(r["minutes"] or 0)
+            if a and z and a.isoformat() <= d <= z.isoformat():
+                x["per"] += 1
+            wd = date.fromisoformat(d).weekday()
+            if wd < 5:
+                x["wd"][wd] += 1
+        n = max(1, len(teachers))
+        dates = len({r["d"] for r in recs})
+        if db.get_setting("mode", "daily") == "daily":      # ίδια πίστωση με τον αλγόριθμο (fair_credit "days")
+            per_day = max(1, len(db.areas(True))) / n
+        else:
+            per_day = (len(recs) / dates if dates else max(1, len(db.areas(True)))) / n
+        exc = self.excused_dates([t.id for t in teachers])
+        for tid, x in st.items():
+            ex = exc.get(tid, []) if x["participates"] else []
+            x["year"] = x["done"] + x["plan"]
+            x["credit"] = per_day * len(ex)
+            x["credit_today"] = per_day * sum(1 for d in ex if d < today)
+        part = [x for x in st.values() if x["participates"]]
+        mean_today = sum(x["done"] + x["credit_today"] for x in part) / len(part) if part else 0
+        mean_year = sum(x["year"] + x["credit"] for x in part) / len(part) if part else 0
+        for x in st.values():
+            x["dev_today"] = x["done"] + x["credit_today"] - mean_today
+            x["dev_year"] = x["year"] + x["credit"] - mean_year
+        rows = sorted(st.values(), key=lambda x: (not x["participates"], x["name"].casefold()))
+        return {"rows": rows, "start": start, "today": today, "mean_today": mean_today, "mean_year": mean_year}
 
     def year_loads(self, teachers=None) -> Dict[int, int]:
         """Ετήσιο φορτίο (λεπτά) για σύγκριση δικαιοσύνης: πραγματικές εφημερίες + συμψηφισμός ημερών χωρίς αναπλήρωση."""
@@ -4281,20 +4335,14 @@ class EfimeriesApp:
             return False
         mode_gr = {"daily": "Ημέρα", "breaks": "Διάλειμμα", "shifts": "Βάρδια"}
         prog = []
+        today = date.today().isoformat()
         for r in rows:
-            status = "Πραγματοποιημένο" if r[10] == "manual_completed" else ("Κλειδωμένο" if r[9] else "Μελλοντικό")
+            status = ("Πραγματοποιημένο" if (r[10] == "manual_completed" or r[0] < today or (r[0] == today and r[9]))
+                      else ("Κλειδωμένο" if r[9] else "Μελλοντικό"))
             prog.append((parse_date(r[0]), r[1], r[2], r[3], r[4], r[5], r[6], int(r[7] or 0), mode_gr.get(r[8], r[8]), status))
-        tot = {}
-        for r in rows:
-            t = tot.setdefault(r[6], [0, set(), 0])
-            t[0] += 1
-            t[1].add(r[0])
-            t[2] += int(r[7] or 0)
-        for (name,) in conn.execute("SELECT name FROM teachers WHERE active=1 AND participates=1").fetchall():
-            tot.setdefault(name, [0, set(), 0])
-        mean_days = sum(len(v[1]) for v in tot.values()) / len(tot)
-        tot_rows = [(n, v[0], len(v[1]), v[2], v[2] / 60.0, len(v[1]) - mean_days)
-                    for n, v in sorted(tot.items(), key=lambda kv: (-len(kv[1][1]), kv[0]))]
+        dt_ = self.duty_totals()
+        tot_rows = [(x["name"], x["done"], x["plan"], x["year"], x["minutes"], round(x["minutes"] / 60.0, 2),
+                     round(x["credit"], 1), round(x["dev_today"], 1), round(x["dev_year"], 1)) for x in dt_["rows"]]
         ab_rows = []
         for name, d1, d2, reason in conn.execute(
                 "SELECT t.name,a.d_from,a.d_to,a.reason FROM absences a JOIN teachers t ON t.id=a.teacher_id ORDER BY a.d_from,t.name").fetchall():
@@ -4302,8 +4350,9 @@ class EfimeriesApp:
         write_xlsx(path, [
             ("Πρόγραμμα", ["Ημερομηνία", "Ημέρα", "Χρόνος", "Από", "Έως", "Τομέας", "Εκπαιδευτικός", "Λεπτά", "Τρόπος", "Κατάσταση"],
              prog, [13, 12, 18, 8, 8, 18, 30, 8, 12, 18]),
-            ("Σύνολα", ["Εκπαιδευτικός", "Αναθέσεις", "Ημέρες εφημερίας", "Λεπτά", "Ώρες", "Απόκλιση ημερών από μέσο όρο"],
-             tot_rows, [32, 11, 17, 9, 9, 28]),
+            ("Σύνολα", ["Εκπαιδευτικός", "Πραγματοποιημένες", "Προγραμματισμένες", "Σύνολο έτους", "Λεπτά", "Ώρες",
+                        "Πίστωση απουσιών", "Απόκλιση έως σήμερα", "Απόκλιση τέλους έτους"],
+             tot_rows, [32, 18, 18, 13, 9, 9, 16, 19, 21]),
             ("Απουσίες", ["Εκπαιδευτικός", "Από", "Έως", "Ημέρες", "Αιτιολογία"], ab_rows, [32, 13, 13, 9, 34]),
         ])
         return True
